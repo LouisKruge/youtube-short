@@ -161,6 +161,24 @@ Make sure **Project Settings → Git** has the repository connected and
 pointed at a branch that does not exist — shows *"No Production Deployment"*
 and never builds.
 
+[`vercel.json`](./vercel.json) pins `"framework": "nextjs"`, and it needs to
+stay. A Vercel project created against an *empty* repository has nothing to
+detect, so it falls back to the "Other" preset and looks for a static
+`public/` directory after the build — producing:
+
+```
+Error: No Output Directory named "public" found after the Build completed.
+```
+
+The build itself succeeds; Vercel just doesn't know where to look. The
+`framework` key overrides the Project Settings preset, so the fix travels with
+the repo rather than living in a dashboard toggle. (If that error survives
+this file, someone has *explicitly* set an Output Directory in **Project
+Settings → Build & Deployment** — clear it back to auto-detect.)
+
+The file deliberately contains no `crons` and no `functions.maxDuration` —
+see the Hobby note at the top.
+
 The worker's own schedule replaces what cron jobs would have done:
 
 | Stage | Cadence | Does |
