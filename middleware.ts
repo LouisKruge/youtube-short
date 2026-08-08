@@ -8,7 +8,7 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
  * Refreshes the Supabase session and gates the whole app behind sign-in.
  * Cron and OAuth callback routes are exempt — they authenticate differently.
  */
-const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/cron", "/api/auth/youtube/callback"];
+const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/auth/youtube/callback"];
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });

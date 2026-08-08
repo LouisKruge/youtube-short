@@ -18,6 +18,7 @@ import { downloadSource } from "./download.js";
 import { generateHooks } from "./hooks.js";
 import { segmentClip } from "./segment.js";
 import { transcribeClip, type Transcript } from "./transcribe.js";
+import { autoApproveStage, uploadStage } from "./upload.js";
 
 /**
  * Stage 5 + 7 — Transcribe, then write hooks.
@@ -225,6 +226,30 @@ export async function runTick(): Promise<{ handled: number }> {
       });
       await failClip(toRender, err);
     }
+  }
+
+  // --- Publish stages -----------------------------------------------------
+  // These live here rather than in a Vercel cron: a serverless function's
+  // execution ceiling is shorter than a 1080x1920 upload routinely takes, and
+  // the rendered file is already on this machine.
+  try {
+    const approved = await autoApproveStage();
+    if (approved > 0) {
+      handled += approved;
+      log.info("Clips auto-approved", { count: approved });
+    }
+  } catch (err) {
+    log.error("Auto-approve failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  try {
+    if (await uploadStage()) handled += 1;
+  } catch (err) {
+    log.error("Upload stage failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   return { handled };

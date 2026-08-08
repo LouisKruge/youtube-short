@@ -19,9 +19,18 @@ the caption renderer:
 | `clip.pending_segment` | cut + scale/crop to 1080×1920 in one ffmpeg pass | `transcribing` |
 | `clip.transcribing` | Whisper word timestamps, then Claude hooks | `ready_for_review` |
 | `clip.rendering` | burn the selected caption style in | `queued` |
+| `clip.ready_for_review` | auto-approve: default style + top hook (only when auto-upload is on) | `rendering` |
+| `clip.queued` | reserve quota, upload to YouTube, record the result | `uploaded` |
 
-Upload is deliberately *not* here — it lives in the app's cron so quota
-accounting stays in one place.
+The last two are what Vercel cron jobs would otherwise have done. They live
+here because a serverless function's execution ceiling is shorter than a
+1080×1920 upload routinely takes, because Hobby restricts cron frequency, and
+because the rendered file is already on this machine — uploading from Vercel
+meant pulling it back out of Storage first.
+
+Upload claims a clip by transitioning `queued → uploading` in the same
+statement that selects it. The status change *is* the lock: a second worker's
+update matches zero rows, so a clip can never be published twice.
 
 ## Job claiming
 

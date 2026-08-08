@@ -1,5 +1,9 @@
+/**
+ * The app owns only the OAuth *authorization* flow, because that requires a
+ * browser redirect. The upload itself runs on the worker (worker/src/youtube.ts),
+ * which reads the refresh token this module stores.
+ */
 import { google } from "googleapis";
-import type { Readable } from "node:stream";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const YOUTUBE_SCOPES = [
@@ -77,86 +81,4 @@ export async function completeConnection(
     channelId: channel?.id ?? null,
     channelTitle: channel?.snippet?.title ?? null,
   };
-}
-
-/** Builds an authorized client from the stored refresh token. */
-export async function authorizedClient(ownerId: string) {
-  const db = createAdminClient();
-  const { data } = await db
-    .from("youtube_accounts")
-    .select("refresh_token, access_token, token_expires_at")
-    .eq("owner_id", ownerId)
-    .maybeSingle();
-
-  if (!data?.refresh_token) {
-    throw new Error("No YouTube channel is connected.");
-  }
-
-  const auth = oauthClient();
-  auth.setCredentials({
-    refresh_token: data.refresh_token as string,
-    access_token: (data.access_token as string | null) ?? undefined,
-    expiry_date: data.token_expires_at
-      ? new Date(data.token_expires_at as string).getTime()
-      : undefined,
-  });
-
-  // Persist rotated access tokens so we are not refreshing on every call.
-  auth.on("tokens", (tokens) => {
-    void db
-      .from("youtube_accounts")
-      .update({
-        access_token: tokens.access_token ?? null,
-        token_expires_at: tokens.expiry_date
-          ? new Date(tokens.expiry_date).toISOString()
-          : null,
-      })
-      .eq("owner_id", ownerId);
-  });
-
-  return auth;
-}
-
-export interface UploadRequest {
-  ownerId: string;
-  title: string;
-  description: string;
-  tags: string[];
-  privacyStatus: "public" | "unlisted" | "private";
-  body: Readable;
-}
-
-export interface UploadResult {
-  videoId: string;
-  url: string;
-}
-
-/**
- * Uploads one clip. Costs 1,600 quota units — the caller must have reserved
- * them first (see lib/quota.ts).
- */
-export async function uploadVideo(req: UploadRequest): Promise<UploadResult> {
-  const auth = await authorizedClient(req.ownerId);
-  const youtube = google.youtube({ version: "v3", auth });
-
-  const { data } = await youtube.videos.insert({
-    part: ["snippet", "status"],
-    requestBody: {
-      snippet: {
-        // YouTube rejects titles over 100 characters outright.
-        title: req.title.slice(0, 100),
-        description: req.description.slice(0, 5000),
-        tags: req.tags.slice(0, 30),
-      },
-      status: {
-        privacyStatus: req.privacyStatus,
-        selfDeclaredMadeForKids: false,
-      },
-    },
-    media: { body: req.body },
-  });
-
-  if (!data.id) throw new Error("YouTube accepted the upload but returned no video ID.");
-
-  return { videoId: data.id, url: `https://www.youtube.com/watch?v=${data.id}` };
 }

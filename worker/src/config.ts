@@ -15,6 +15,13 @@ export const config = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
   openaiApiKey: process.env.OPENAI_API_KEY ?? "",
 
+  // YouTube uploads run here rather than on Vercel: the upload of a 30s
+  // 1080x1920 clip routinely outlives a serverless function's ceiling, and
+  // the rendered file is already on this machine.
+  googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+  googleRedirectUri: process.env.GOOGLE_REDIRECT_URI ?? "",
+
   mediaDir: process.env.MEDIA_DIR ?? "/tmp/nexus-media",
 
   /** How often the worker polls for work on its own, independent of nudges. */

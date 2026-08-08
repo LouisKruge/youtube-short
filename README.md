@@ -14,9 +14,17 @@ requirement, not a preference:
 
 | | Vercel app | Worker service |
 |---|---|---|
-| **Runs** | Dashboard, queue, API routes, YouTube upload cron | yt-dlp, ffmpeg, Whisper |
+| **Runs** | Dashboard, queue, API routes, YouTube OAuth | yt-dlp, ffmpeg, Whisper, **and the YouTube upload** |
 | **Why there** | Serverless functions suit request/response work | Video work needs real disk, real binaries, and minutes of runtime |
-| **Deploy to** | Vercel | Railway, Render, Fly.io, or any container host |
+| **Deploy to** | Vercel (**Hobby is fine**) | Railway, Render, Fly.io, or any container host |
+
+**There are no Vercel cron jobs.** The worker drives its own schedule from a
+60-second poll loop. That is deliberate: Hobby restricts both how many cron
+jobs you get and how often they may fire, and a serverless function's
+execution ceiling is shorter than a 1080×1920 upload routinely takes. Putting
+the schedule and the upload on the worker removes both limits and keeps the
+rendered file on the machine that made it, instead of round-tripping it
+through a function. The Vercel side is a pure dashboard.
 
 A Vercel function has no ffmpeg or yt-dlp binary, no writable disk beyond
 `/tmp`, and an execution ceiling (10s Hobby, 60s Pro, up to 900s with Fluid
@@ -33,18 +41,17 @@ forever.
       ▼
 ┌──────────────┐   nudge (HTTP)   ┌──────────────────────────────┐
 │  Vercel app  │ ───────────────▶ │  Worker (Railway/Render/Fly) │
-│              │                  │  yt-dlp · ffmpeg · Whisper   │
-│  cron:       │                  └──────────────┬───────────────┘
-│  /dispatch   │                                 │
-│  /upload ────┼──▶ YouTube Data API v3          │ claims jobs,
-└──────┬───────┘                                 │ writes results
-       │                                         │
-       └──────────────▶ Supabase ◀───────────────┘
-                     (Postgres + Storage)
+│  dashboard   │                  │  yt-dlp · ffmpeg · Whisper   │
+│  + OAuth     │                  │  + upload · self-polls 60s   │
+└──────┬───────┘                  └────────┬──────────────┬──────┘
+       │                                   │              │
+       │                    claims jobs,   │              ▼
+       └────────▶ Supabase ◀───────────────┘     YouTube Data API v3
+              (Postgres + Storage)
 ```
 
-The worker is nudged for responsiveness but does not depend on it — it also
-self-polls every 60s, so a lost nudge or a sleeping app only delays work.
+The nudge is only for responsiveness — the worker self-polls every 60s, so a
+lost nudge or a sleeping app delays work rather than stopping it.
 
 ---
 
@@ -59,7 +66,7 @@ self-polls every 60s, so a lost nudge or a sleeping app only delays work.
 | 7 | Hooks | Worker | Claude (`claude-opus-5`) writes 3–5 description hooks |
 | 8 | Review gate | App | Clip appears as **Ready**; needs a caption style and a hook |
 | 6 | Caption burn-in | Worker | Generates an ASS subtitle track and burns it in |
-| 9 | Upload | App (cron) | Reserves quota, uploads via YouTube Data API v3, records the result |
+| 9 | Upload | Worker | Reserves quota, uploads via YouTube Data API v3, records the result |
 
 Caption burn-in is numbered 6 but happens after review — see the tradeoff
 below.
@@ -145,20 +152,24 @@ must share `WORKER_SHARED_SECRET` with the app.
 
 ### 5. Deploy the app to Vercel
 
-Set the env vars from [`.env.example`](./.env.example), then deploy. The cron
-schedules in [`vercel.json`](./vercel.json) register automatically:
+Set the env vars from [`.env.example`](./.env.example), then deploy. Nothing
+here exceeds Hobby limits: every route is a short request/response handler,
+there are no cron jobs, and no function raises `maxDuration`.
 
-| Path | Schedule | Does |
+Make sure **Project Settings → Git** has the repository connected and
+**Production Branch** set to `main`. A project with no connected repo — or one
+pointed at a branch that does not exist — shows *"No Production Deployment"*
+and never builds.
+
+The worker's own schedule replaces what cron jobs would have done:
+
+| Stage | Cadence | Does |
 |---|---|---|
-| `/api/cron/dispatch` | every 5 min | Auto-approves clips (only when auto-upload is on) and nudges the worker |
-| `/api/cron/upload` | every 2 hours | Uploads queued clips within remaining quota |
+| Auto-approve | every worker pass | Picks default caption style and top hook (only when auto-upload is on) |
+| Upload | every worker pass | Publishes one queued clip per pass, within remaining quota |
 
-> **`/api/cron/upload` sets `maxDuration = 300`**, which needs Vercel Pro or
-> Fluid Compute. On Hobby the function is capped at 10s and uploads will time
-> out — either upgrade, or move the upload step to the worker.
-
-Cron requests are authenticated with `CRON_SECRET`, which Vercel sends as
-`Authorization: Bearer $CRON_SECRET`.
+A pass runs on every self-poll (60s by default, `POLL_INTERVAL_MS`) and on
+every nudge from the app.
 
 ---
 
@@ -171,8 +182,8 @@ A `videos.insert` costs **1,600 units**.
 
 - Usage is tracked per day in `quota_usage`.
 - Reservation happens in a single SQL function (`reserve_quota`) that
-  check-and-increments under a row lock, so two overlapping cron runs cannot
-  both spend the last slot.
+  check-and-increments under a row lock, so two overlapping worker passes
+  cannot both spend the last slot.
 - When the ceiling is reached the remaining clips stay `queued` for the next
   day. Nothing is dropped.
 - Quota resets at **midnight Pacific**, not UTC — this trips people up. Verify

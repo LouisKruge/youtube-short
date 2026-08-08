@@ -47,52 +47,6 @@ export async function getQuota(
   };
 }
 
-/**
- * Atomically reserves quota for one upload. Returns false when the reservation
- * would breach the ceiling — the caller must then leave the clip queued for
- * tomorrow rather than attempting the upload.
- *
- * The check-and-increment happens inside a single SQL function with a row
- * lock, so two overlapping cron invocations cannot both spend the last slot.
- */
-export async function reserveUploadQuota(
-  ownerId: string,
-  limit: number,
-): Promise<boolean> {
-  const db = createAdminClient();
-
-  const { data, error } = await db.rpc("reserve_quota", {
-    p_owner: ownerId,
-    p_date: quotaDate(),
-    p_units: UPLOAD_COST_UNITS,
-    p_ceiling: limit,
-  });
-
-  if (error) throw new Error(`Quota reservation failed: ${error.message}`);
-  return data === true;
-}
-
-/**
- * Releases a reservation when an upload fails before consuming its units.
- * Best-effort: YouTube charges quota on request, not on success, so this is
- * only called for failures that never reached the API (auth, missing file).
- */
-export async function releaseUploadQuota(ownerId: string): Promise<void> {
-  const db = createAdminClient();
-  const date = quotaDate();
-
-  const { data } = await db
-    .from("quota_usage")
-    .select("units_used")
-    .eq("owner_id", ownerId)
-    .eq("usage_date", date)
-    .maybeSingle();
-
-  const used = (data?.units_used as number | undefined) ?? 0;
-
-  await db
-    .from("quota_usage")
-    .update({ units_used: Math.max(0, used - UPLOAD_COST_UNITS) })
-    .eq("owner_id", ownerId)
-    .eq("usage_date", date);
-}
+// Reserving and releasing quota lives on the worker, next to the upload that
+// spends it — see worker/src/quota.ts. The app only ever reads the ledger to
+// display it.

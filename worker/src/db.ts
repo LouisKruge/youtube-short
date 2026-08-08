@@ -26,6 +26,7 @@ export interface ClipJob {
   storage_path: string | null;
   caption_style: "karaoke" | "static" | null;
   caption_paths: Record<string, string>;
+  caption_burned_path: string | null;
   transcript: unknown;
   attempts: number;
 }
@@ -130,7 +131,26 @@ export async function failClip(job: ClipJob, err: unknown) {
   });
 }
 
-export async function getSettings(ownerId: string) {
+export interface OwnerSettings {
+  owner_id: string;
+  auto_upload_enabled: boolean;
+  default_caption_style: "karaoke" | "static";
+  clip_length_seconds: number;
+  max_clips_per_source: number;
+  daily_quota_limit: number;
+  youtube_privacy_status: "public" | "unlisted" | "private";
+}
+
+const SETTINGS_DEFAULTS = {
+  auto_upload_enabled: false,
+  default_caption_style: "karaoke" as const,
+  clip_length_seconds: 30,
+  max_clips_per_source: 8,
+  daily_quota_limit: 10000,
+  youtube_privacy_status: "public" as const,
+};
+
+export async function getSettings(ownerId: string): Promise<OwnerSettings> {
   const { data } = await db
     .from("app_settings")
     .select("*")
@@ -138,9 +158,47 @@ export async function getSettings(ownerId: string) {
     .maybeSingle();
 
   return {
-    clip_length_seconds: (data?.clip_length_seconds as number) ?? 30,
-    max_clips_per_source: (data?.max_clips_per_source as number) ?? 8,
-    default_caption_style:
-      ((data?.default_caption_style as string) ?? "karaoke") as "karaoke" | "static",
+    owner_id: ownerId,
+    ...SETTINGS_DEFAULTS,
+    ...((data ?? {}) as Partial<OwnerSettings>),
   };
+}
+
+/** Every owner with a settings row — the worker's unit of work. */
+export async function listOwners(): Promise<OwnerSettings[]> {
+  const { data } = await db.from("app_settings").select("*");
+  return ((data ?? []) as unknown as Partial<OwnerSettings>[]).map((row) => ({
+    ...SETTINGS_DEFAULTS,
+    ...row,
+  })) as OwnerSettings[];
+}
+
+/**
+ * Claims one queued clip for upload by transitioning it to `uploading` in the
+ * same statement that selects it. The status change *is* the lock — a second
+ * worker's update matches zero rows, so a clip can never be published twice.
+ */
+export async function claimQueuedClip(ownerId: string): Promise<ClipJob | null> {
+  const { data: candidates } = await db
+    .from("clips")
+    .select("*")
+    .eq("owner_id", ownerId)
+    .eq("status", "queued")
+    .not("caption_burned_path", "is", null)
+    .order("peak_score", { ascending: false })
+    .limit(5);
+
+  for (const candidate of (candidates ?? []) as unknown as ClipJob[]) {
+    const { data: claimed } = await db
+      .from("clips")
+      .update({ status: "uploading", claimed_at: new Date().toISOString() })
+      .eq("id", candidate.id)
+      .eq("status", "queued")
+      .select("*")
+      .maybeSingle();
+
+    if (claimed) return claimed as unknown as ClipJob;
+  }
+
+  return null;
 }
