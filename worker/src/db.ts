@@ -25,9 +25,18 @@ export interface ClipJob {
   status: string;
   storage_path: string | null;
   caption_style: "karaoke" | "static" | null;
+  caption_preset: "clean" | "punch" | "cinematic" | "minimal" | null;
   caption_paths: Record<string, string>;
   caption_burned_path: string | null;
   transcript: unknown;
+  rank: number | null;
+  score: number | null;
+  category: string | null;
+  rationale: string | null;
+  hook_analysis: unknown;
+  dead_time: unknown;
+  crop_track: unknown;
+  library_status: string;
   attempts: number;
 }
 
@@ -135,8 +144,12 @@ export interface OwnerSettings {
   owner_id: string;
   auto_upload_enabled: boolean;
   default_caption_style: "karaoke" | "static";
+  default_caption_preset: "clean" | "punch" | "cinematic" | "minimal";
   clip_length_seconds: number;
   max_clips_per_source: number;
+  shorts_per_source: number;
+  remove_dead_time: boolean;
+  smart_crop: boolean;
   daily_quota_limit: number;
   youtube_privacy_status: "public" | "unlisted" | "private";
 }
@@ -144,8 +157,12 @@ export interface OwnerSettings {
 const SETTINGS_DEFAULTS = {
   auto_upload_enabled: false,
   default_caption_style: "karaoke" as const,
+  default_caption_preset: "clean" as const,
   clip_length_seconds: 30,
   max_clips_per_source: 8,
+  shorts_per_source: 10,
+  remove_dead_time: true,
+  smart_crop: true,
   daily_quota_limit: 10000,
   youtube_privacy_status: "public" as const,
 };

@@ -1,24 +1,25 @@
 import { join } from "node:path";
-import { db, updateClip, type ClipJob } from "../db.js";
+import { db, getSettings, updateClip, type ClipJob } from "../db.js";
 import { ffmpeg } from "../exec.js";
 import { log } from "../log.js";
 import { cleanup, downloadFile, scratchDir, uploadFile } from "../storage.js";
+import { buildCropFilter, computeCropTrack } from "./crop.js";
+import {
+  buildDeadTimeFilters,
+  detectDeadTime,
+  totalDeadSeconds,
+  type DeadSpan,
+} from "./deadtime.js";
 
 /**
- * Stages 3 + 4 — Segment and crop, in one encode.
+ * Stages 3 + 4 — Segment, crop to 9:16, and trim dead time.
  *
- * Cutting and cropping separately would mean decoding and re-encoding the
- * same footage twice for no quality gain, so they share a pass. The video
- * filter scales the source to *cover* a 1080x1920 frame and centre-crops the
- * overflow — the standard, predictable transform. It has no idea where the
- * subject is; a two-shot will lose one of the two.
+ * Done in two ffmpeg passes rather than one. The first cuts the window at the
+ * source resolution so crop tracking and dead-time detection have real footage
+ * to measure; the second applies both. Measuring on an already-cropped clip
+ * would be circular — the tracker would only ever see what the centre crop
+ * happened to include.
  */
-const VERTICAL_FILTER = [
-  "scale=1080:1920:force_original_aspect_ratio=increase",
-  "crop=1080:1920",
-  "setsar=1",
-].join(",");
-
 export async function segmentClip(job: ClipJob): Promise<void> {
   await updateClip(job.id, { status: "cropping" });
   const dir = await scratchDir("clip");
@@ -33,24 +34,90 @@ export async function segmentClip(job: ClipJob): Promise<void> {
     const sourcePath = source?.storage_path as string | undefined;
     if (!sourcePath) throw new Error("The source video is no longer available.");
 
+    const settings = await getSettings(job.owner_id);
+
     const localSource = join(dir, "source.mp4");
     await downloadFile(sourcePath, localSource);
 
-    const output = join(dir, "clip.mp4");
-    const duration = Number(job.end_seconds) - Number(job.start_seconds);
+    let start = Number(job.start_seconds);
+    const end = Number(job.end_seconds);
 
+    // Hook restructure: when the operator accepted the suggestion, open on the
+    // strongest beat instead of the window's original start.
+    const hook = job.hook_analysis as
+      | { best_opening_at?: number; applied?: boolean }
+      | null;
+    if (hook?.applied && typeof hook.best_opening_at === "number" && hook.best_opening_at > 0) {
+      start = Number((start + hook.best_opening_at).toFixed(2));
+      log.info("Applying hook restructure", {
+        clipId: job.id,
+        offsetSeconds: hook.best_opening_at,
+      });
+    }
+
+    const duration = Math.max(3, end - start);
+
+    // --- Pass 1: cut the window, full frame -------------------------------
+    const rough = join(dir, "rough.mp4");
     await ffmpeg(
       [
         // -ss before -i seeks fast; -accurate_seek keeps the cut frame-exact.
         "-accurate_seek",
         "-ss",
-        String(job.start_seconds),
+        String(start),
         "-i",
         localSource,
         "-t",
         String(duration),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-ar",
+        "48000",
+        rough,
+      ],
+      15 * 60_000,
+    );
+
+    // --- Measure ----------------------------------------------------------
+    const cropTrack = settings.smart_crop
+      ? await computeCropTrack(rough, duration, dir)
+      : null;
+
+    let deadSpans: DeadSpan[] = [];
+    if (settings.remove_dead_time) {
+      deadSpans = await detectDeadTime(rough, duration);
+    }
+
+    const deadFilters = buildDeadTimeFilters(deadSpans);
+    const cropFilter = buildCropFilter(cropTrack);
+
+    // --- Pass 2: crop to 9:16, drop dead time -----------------------------
+    const output = join(dir, "clip.mp4");
+
+    // select= renumbers frames, so it has to run before the crop expression
+    // that reads `t` — otherwise the timestamps the crop sees are the ones
+    // being discarded.
+    const videoFilter = deadFilters
+      ? `${deadFilters.video},${cropFilter}`
+      : cropFilter;
+
+    await ffmpeg(
+      [
+        "-i",
+        rough,
         "-vf",
-        VERTICAL_FILTER,
+        videoFilter,
+        ...(deadFilters ? ["-af", deadFilters.audio] : []),
         "-c:v",
         "libx264",
         "-preset",
@@ -84,6 +151,10 @@ export async function segmentClip(job: ClipJob): Promise<void> {
     await updateClip(job.id, {
       status: "transcribing",
       storage_path: storagePath,
+      start_seconds: start,
+      crop_track: cropTrack,
+      dead_time: deadSpans,
+      dead_time_removed: deadSpans.length > 0,
       claimed_at: null,
       error_message: null,
       // Attempts are per stage, not per clip. Without this reset a clip that
@@ -92,7 +163,13 @@ export async function segmentClip(job: ClipJob): Promise<void> {
       attempts: 0,
     });
 
-    log.info("Clip cut and cropped", { clipId: job.id, duration });
+    log.info("Clip cut and cropped", {
+      clipId: job.id,
+      duration: Number(duration.toFixed(2)),
+      cropMethod: cropTrack?.method ?? "center",
+      cropSegments: cropTrack?.segments.length ?? 0,
+      deadTimeRemoved: totalDeadSeconds(deadSpans),
+    });
   } finally {
     await cleanup(dir);
   }

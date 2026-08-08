@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { config } from "../config.js";
 import {
   claimClip,
@@ -13,19 +13,24 @@ import {
 import { log } from "../log.js";
 import { cleanup, downloadFile, scratchDir, uploadFile } from "../storage.js";
 import { analyzeSource } from "./analyze.js";
-import { burnCaptions, type CaptionStyle } from "./captions.js";
+import {
+  burnCaptions,
+  type CaptionPreset,
+  type CaptionStyle,
+} from "./captions.js";
 import { downloadSource } from "./download.js";
-import { generateHooks } from "./hooks.js";
+import { extractCoverFrames, generateMetadata } from "./metadata.js";
+import { refreshStyleProfile } from "./moments.js";
 import { segmentClip } from "./segment.js";
 import { transcribeClip, type Transcript } from "./transcribe.js";
 import { autoApproveStage, uploadStage } from "./upload.js";
 
 /**
- * Stage 5 + 7 — Transcribe, then write hooks.
+ * Stages 5 + 7 — Transcribe the cut clip, then write its metadata.
  *
- * These share a stage because both need the transcript and neither is worth a
- * separate claim round-trip. When RENDER_BOTH_CAPTION_STYLES is on, both
- * caption variants are also burned here (see config.ts for the tradeoff).
+ * These share a stage because both need the clip transcript and neither is
+ * worth a separate claim round-trip. When RENDER_BOTH_CAPTION_STYLES is on,
+ * both caption variants are also burned here (see config.ts for the tradeoff).
  */
 async function transcribeAndDescribe(job: ClipJob): Promise<void> {
   if (!job.storage_path) throw new Error("Clip has no stored file to transcribe.");
@@ -49,25 +54,50 @@ async function transcribeAndDescribe(job: ClipJob): Promise<void> {
 
     const sourceTitle = (source?.title as string | null) ?? null;
 
-    const hooks = await generateHooks(transcript, sourceTitle);
+    const metadata = await generateMetadata(transcript, {
+      sourceTitle,
+      category: job.category,
+      rationale: job.rationale,
+    });
 
+    // Hooks and title alternatives share the table, separated by `kind`.
     await db.from("hooks").delete().eq("clip_id", job.id);
-    await db.from("hooks").insert(
-      hooks.map((text) => ({
+    await db.from("hooks").insert([
+      ...metadata.hooks.map((text) => ({
         owner_id: job.owner_id,
         clip_id: job.id,
         hook_text: text,
+        kind: "hook",
         is_selected: false,
       })),
-    );
+      ...metadata.titles.map((text) => ({
+        owner_id: job.owner_id,
+        clip_id: job.id,
+        hook_text: text,
+        kind: "title",
+        is_selected: false,
+      })),
+    ]);
+
+    // Cover frames. Uploaded as JPEGs alongside the clip.
+    const duration = Number(job.end_seconds) - Number(job.start_seconds);
+    const frames = await extractCoverFrames(localPath, duration, dir);
+    const coverPaths: string[] = [];
+
+    for (const frame of frames) {
+      const path = `${job.owner_id}/covers/${job.id}-${basename(frame)}`;
+      await uploadFile(frame, path, "image/jpeg");
+      coverPaths.push(path);
+    }
 
     const captionPaths: Record<string, string> = {};
     if (config.renderBothCaptionStyles && transcript.words.length > 0) {
+      const preset = (job.caption_preset ?? "clean") as CaptionPreset;
       for (const style of ["karaoke", "static"] as CaptionStyle[]) {
-        const output = await burnCaptions(localPath, transcript, style, dir);
-        const path = `${job.owner_id}/captioned/${job.id}-${style}.mp4`;
+        const output = await burnCaptions(localPath, transcript, style, dir, preset);
+        const path = `${job.owner_id}/captioned/${job.id}-${preset}-${style}.mp4`;
         await uploadFile(output, path, "video/mp4");
-        captionPaths[style] = path;
+        captionPaths[`${preset}:${style}`] = path;
       }
     }
 
@@ -75,6 +105,11 @@ async function transcribeAndDescribe(job: ClipJob): Promise<void> {
       status: "ready_for_review",
       transcript,
       caption_paths: captionPaths,
+      title: metadata.titles[0] ?? null,
+      description: metadata.description,
+      hashtags: metadata.hashtags,
+      cover_candidates: coverPaths,
+      cover_frame_path: coverPaths[0] ?? null,
       claimed_at: null,
       error_message: null,
       attempts: 0,
@@ -83,7 +118,9 @@ async function transcribeAndDescribe(job: ClipJob): Promise<void> {
     log.info("Clip transcribed and described", {
       clipId: job.id,
       words: transcript.words.length,
-      hooks: hooks.length,
+      hooks: metadata.hooks.length,
+      titles: metadata.titles.length,
+      covers: coverPaths.length,
       prerendered: Object.keys(captionPaths),
     });
   } finally {
@@ -96,11 +133,15 @@ async function renderCaptions(job: ClipJob): Promise<void> {
   if (!job.storage_path) throw new Error("Clip has no stored file to caption.");
 
   const settings = await getSettings(job.owner_id);
-  const style: CaptionStyle = job.caption_style ?? settings.default_caption_style;
+  const style: CaptionStyle = (job.caption_style ??
+    settings.default_caption_style) as CaptionStyle;
+  const preset: CaptionPreset = (job.caption_preset ??
+    settings.default_caption_preset) as CaptionPreset;
   const transcript = (job.transcript as Transcript | null) ?? { text: "", words: [] };
 
-  // Already rendered this variant — nothing to redo.
-  const existing = job.caption_paths?.[style];
+  // Already rendered this exact combination — nothing to redo.
+  const key = `${preset}:${style}`;
+  const existing = job.caption_paths?.[key];
   if (existing) {
     await updateClip(job.id, {
       status: "queued",
@@ -128,21 +169,21 @@ async function renderCaptions(job: ClipJob): Promise<void> {
         clipId: job.id,
       });
     } else {
-      const output = await burnCaptions(localPath, transcript, style, dir);
-      storagePath = `${job.owner_id}/captioned/${job.id}-${style}.mp4`;
+      const output = await burnCaptions(localPath, transcript, style, dir, preset);
+      storagePath = `${job.owner_id}/captioned/${job.id}-${preset}-${style}.mp4`;
       await uploadFile(output, storagePath, "video/mp4");
     }
 
     await updateClip(job.id, {
       status: "queued",
       caption_burned_path: storagePath,
-      caption_paths: { ...(job.caption_paths ?? {}), [style]: storagePath },
+      caption_paths: { ...(job.caption_paths ?? {}), [key]: storagePath },
       claimed_at: null,
       error_message: null,
       attempts: 0,
     });
 
-    log.info("Captions burned in", { clipId: job.id, style });
+    log.info("Captions burned in", { clipId: job.id, style, preset });
   } finally {
     await cleanup(dir);
   }
@@ -263,5 +304,19 @@ export async function drain(maxPasses = 40): Promise<number> {
     if (handled === 0) break;
     total += handled;
   }
+
+  // Style learning is cheap and only worth doing once the queue is quiet.
+  if (total > 0) {
+    const { data: owners } = await db.from("app_settings").select("owner_id");
+    for (const row of (owners ?? []) as Array<{ owner_id: string }>) {
+      await refreshStyleProfile(row.owner_id).catch((err) =>
+        log.warn("Style profile refresh failed", {
+          ownerId: row.owner_id,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  }
+
   return total;
 }

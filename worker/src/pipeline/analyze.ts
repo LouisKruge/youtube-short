@@ -4,13 +4,20 @@ import { db, getSettings, updateSource, type SourceJob } from "../db.js";
 import { ffmpeg } from "../exec.js";
 import { log } from "../log.js";
 import { cleanup, downloadFile, scratchDir } from "../storage.js";
+import { detectScenes, type Scene } from "./scenes.js";
+import { transcribeSource, type Transcript } from "./transcribe.js";
+import {
+  buildCandidateWindows,
+  scoreCandidates,
+  type ScoredCandidate,
+} from "./moments.js";
 
 export interface Silence {
   start: number;
   end: number;
 }
 
-export interface Candidate {
+export interface Peak {
   start: number;
   end: number;
   score: number;
@@ -70,16 +77,7 @@ export async function loudnessEnvelope(inputPath: string): Promise<number[]> {
 /** Silent spans, used to snap cuts so they do not land mid-word. */
 export async function detectSilences(inputPath: string): Promise<Silence[]> {
   const { stderr } = await ffmpeg(
-    [
-      "-i",
-      inputPath,
-      "-vn",
-      "-af",
-      "silencedetect=noise=-32dB:d=0.22",
-      "-f",
-      "null",
-      "-",
-    ],
+    ["-i", inputPath, "-vn", "-af", "silencedetect=noise=-32dB:d=0.22", "-f", "null", "-"],
     20 * 60_000,
   );
 
@@ -120,27 +118,21 @@ function snapToSilence(time: number, silences: Silence[], tolerance = 1.6): numb
 }
 
 /**
- * Picks high-energy windows.
+ * Picks high-energy windows from the audio.
  *
- * A peak is loudness standing above its own rolling neighbourhood, which is
- * robust to a source that is uniformly loud or uniformly quiet. Windows are
- * centred on the peak, snapped outward to the nearest natural pause, and
- * taken greedily by score with no overlap.
- *
- * This measures acoustic intensity. It is not, and cannot be, a measure of
- * what viewers actually watched — no public API exposes that for third-party
- * video, so the UI calls these "high-energy moments" and nothing more.
+ * This is now the *first* pass, not the verdict: a peak is loudness standing
+ * above its own rolling neighbourhood, which finds where something happens
+ * acoustically. Whether that something is worth clipping is decided later by
+ * the moment scorer, which can read what was actually said.
  */
 export function pickCandidates(
   envelope: number[],
   durationSeconds: number,
   silences: Silence[],
   options: { clipLength: number; maxClips: number },
-): Candidate[] {
+): Peak[] {
   const hop = durationSeconds / envelope.length;
   const half = options.clipLength / 2;
-
-  // Baseline over roughly a minute of audio either side of each sample.
   const radius = Math.max(4, Math.round(30 / hop));
 
   const scores = envelope.map((value, i) => {
@@ -148,8 +140,7 @@ export function pickCandidates(
     const to = Math.min(envelope.length, i + radius + 1);
     let sum = 0;
     for (let j = from; j < to; j++) sum += envelope[j];
-    const baseline = sum / (to - from);
-    return value - baseline;
+    return value - sum / (to - from);
   });
 
   const ranked = scores
@@ -157,7 +148,7 @@ export function pickCandidates(
     .filter((p) => p.score > 0)
     .sort((a, b) => b.score - a.score);
 
-  const chosen: Candidate[] = [];
+  const chosen: Peak[] = [];
 
   for (const peak of ranked) {
     if (chosen.length >= options.maxClips) break;
@@ -183,9 +174,7 @@ export function pickCandidates(
       continue;
     }
 
-    // No overlap with an already-chosen, higher-scoring window.
-    const overlaps = chosen.some((c) => start < c.end && end > c.start);
-    if (overlaps) continue;
+    if (chosen.some((c) => start < c.end && end > c.start)) continue;
 
     chosen.push({
       start: Number(start.toFixed(2)),
@@ -197,14 +186,37 @@ export function pickCandidates(
   return chosen.sort((a, b) => a.start - b.start);
 }
 
+/** Downsamples the envelope to something the UI ribbon can render. */
+function downsample(envelope: number[], targetPoints = 480): number[] {
+  const stride = Math.max(1, Math.ceil(envelope.length / targetPoints));
+  const out: number[] = [];
+  for (let i = 0; i < envelope.length; i += stride) {
+    const slice = envelope.slice(i, i + stride);
+    out.push(Number((slice.reduce((a, b) => a + b, 0) / slice.length).toFixed(1)));
+  }
+  return out;
+}
+
+/** Progressive results, so the UI radar can populate while this still runs. */
+async function publishRadar(
+  sourceId: string,
+  entries: Array<{ start: number; end: number; score: number; label: string }>,
+): Promise<void> {
+  await updateSource(sourceId, { radar: entries }).catch(() => {});
+}
+
 /**
- * Stage 2 — Analyze. Produces the loudness envelope the UI renders and one
- * clip row per detected window.
+ * Stage 2 — Analyze.
+ *
+ * Audio energy, silence, scene structure and a full transcript, then a single
+ * scoring pass that ranks every candidate against the others. Produces the
+ * loudness ribbon, the scene timeline, and one clip row per selected moment
+ * carrying its score, factor breakdown, rationale and hook analysis.
  */
 export async function analyzeSource(job: SourceJob): Promise<void> {
   if (!job.storage_path) throw new Error("Source has no stored file to analyze.");
 
-  await updateSource(job.id, { status: "analyzing" });
+  await updateSource(job.id, { status: "analyzing", radar: [] });
   const dir = await scratchDir("analyze");
 
   try {
@@ -212,56 +224,152 @@ export async function analyzeSource(job: SourceJob): Promise<void> {
     await downloadFile(job.storage_path, localPath);
 
     const settings = await getSettings(job.owner_id);
+
     const [envelope, silences] = await Promise.all([
       loudnessEnvelope(localPath),
       detectSilences(localPath),
     ]);
 
-    const duration = job.duration_seconds ?? envelope.length * config.analysisHopSeconds;
+    const duration =
+      job.duration_seconds ?? envelope.length * config.analysisHopSeconds;
 
-    const candidates = pickCandidates(envelope, duration, silences, {
-      clipLength: settings.clip_length_seconds,
-      maxClips: settings.max_clips_per_source,
+    // Publish the ribbon immediately — it is the slowest thing to look at and
+    // the fastest thing to produce.
+    await updateSource(job.id, {
+      duration_seconds: duration,
+      loudness_envelope: downsample(envelope),
     });
 
-    if (candidates.length > 0) {
-      const { error } = await db.from("clips").insert(
-        candidates.map((c) => ({
+    const scenes: Scene[] = await detectScenes(localPath, duration);
+
+    if (scenes.length > 0) {
+      await db.from("scenes").delete().eq("source_video_id", job.id);
+      await db.from("scenes").insert(
+        scenes.map((s) => ({
           owner_id: job.owner_id,
           source_video_id: job.id,
-          start_seconds: c.start,
-          end_seconds: c.end,
-          peak_score: c.score,
+          scene_index: s.index,
+          start_seconds: s.start,
+          end_seconds: s.end,
+        })),
+      );
+    }
+
+    await updateSource(job.id, { scene_count: scenes.length });
+
+    // Audio peaks first, so the radar has something to show during the long
+    // transcription step.
+    const want = settings.shorts_per_source;
+    const peaks = pickCandidates(envelope, duration, silences, {
+      clipLength: settings.clip_length_seconds,
+      maxClips: want * 3,
+    });
+
+    await publishRadar(
+      job.id,
+      peaks.slice(0, 24).map((p) => ({
+        start: p.start,
+        end: p.end,
+        score: p.score,
+        label: "audio peak",
+      })),
+    );
+
+    let transcript: Transcript = { text: "", words: [] };
+    if (config.transcriptionEnabled) {
+      transcript = await transcribeSource(localPath, dir, duration, (fraction) => {
+        log.info("Transcription progress", {
+          sourceId: job.id,
+          percent: Math.round(fraction * 100),
+        });
+      });
+    }
+
+    const { data: styleRow } = await db
+      .from("style_profiles")
+      .select("profile")
+      .eq("owner_id", job.owner_id)
+      .maybeSingle();
+
+    const candidates = buildCandidateWindows({
+      peaks,
+      scenes,
+      transcript,
+      durationSeconds: duration,
+      clipLength: settings.clip_length_seconds,
+      want,
+    });
+
+    const scored = await scoreCandidates(candidates, {
+      sourceTitle: job.title,
+      styleProfile: (styleRow?.profile as unknown) ?? null,
+    });
+
+    // Take the best N, then restore chronological order so the clip list reads
+    // like the video rather than like a leaderboard.
+    const selected: ScoredCandidate[] = scored.slice(0, want);
+    const rankById = new Map(selected.map((s, i) => [s.id, i + 1]));
+    selected.sort((a, b) => a.start - b.start);
+
+    if (selected.length > 0) {
+      await db.from("clips").insert(
+        selected.map((s) => ({
+          owner_id: job.owner_id,
+          source_video_id: job.id,
+          start_seconds: s.start,
+          end_seconds: s.end,
+          peak_score: s.energy,
+          rank: rankById.get(s.id) ?? null,
+          score: s.score,
+          score_factors: s.factors,
+          rationale: s.rationale,
+          category: s.category,
+          hook_analysis: {
+            best_opening_at: s.hook.bestOpeningAt,
+            suggestion: s.hook.suggestion,
+            line: s.hook.line,
+            applied: false,
+          },
+          caption_preset: settings.default_caption_preset,
           status: "pending_segment",
         })),
       );
-      if (error) throw new Error(`Could not create clips: ${error.message}`);
     }
 
-    // The UI ribbon only needs a few hundred points; storing one sample every
-    // half second for an hour-long source would be a 7,200-element blob.
-    const targetPoints = 480;
-    const stride = Math.max(1, Math.ceil(envelope.length / targetPoints));
-    const downsampled: number[] = [];
-    for (let i = 0; i < envelope.length; i += stride) {
-      const slice = envelope.slice(i, i + stride);
-      downsampled.push(
-        Number((slice.reduce((a, b) => a + b, 0) / slice.length).toFixed(1)),
-      );
-    }
+    await publishRadar(
+      job.id,
+      scored.slice(0, 40).map((s) => ({
+        start: s.start,
+        end: s.end,
+        score: s.score,
+        label: s.category,
+      })),
+    );
 
     await updateSource(job.id, {
       status: "analyzed",
       duration_seconds: duration,
-      loudness_envelope: downsampled,
+      transcript,
+      transcript_text: transcript.text,
+      analysis: {
+        candidates_considered: candidates.length,
+        clips_selected: selected.length,
+        scenes: scenes.length,
+        silences: silences.length,
+        transcribed: transcript.words.length > 0,
+        scored_by_model: scored.some((s) => s.category !== "unrated"),
+      },
       claimed_at: null,
       error_message: null,
+      attempts: 0,
     });
 
     log.info("Source analyzed", {
       sourceId: job.id,
-      clips: candidates.length,
-      silences: silences.length,
+      candidates: candidates.length,
+      clips: selected.length,
+      scenes: scenes.length,
+      words: transcript.words.length,
     });
   } finally {
     await cleanup(dir);
