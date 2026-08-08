@@ -156,6 +156,15 @@ begin
 end;
 $$;
 
+-- SECURITY DEFINER lets this hold its row lock and bypass RLS, which also
+-- means it must NOT be reachable over the REST API — an arbitrary p_owner and
+-- p_ceiling would let any caller rewrite another account's quota ledger.
+-- Only the worker (service_role) ever calls it.
+revoke execute on function reserve_quota(uuid, date, integer, integer)
+  from public, anon, authenticated;
+grant execute on function reserve_quota(uuid, date, integer, integer)
+  to service_role;
+
 -- ---------------------------------------------------------------------------
 -- Global app settings (one row per owner)
 -- ---------------------------------------------------------------------------
@@ -192,8 +201,13 @@ create table youtube_accounts (
 -- ---------------------------------------------------------------------------
 -- updated_at maintenance
 -- ---------------------------------------------------------------------------
+-- search_path is pinned so the function body cannot be resolved against a
+-- caller-controlled schema. now() lives in pg_catalog, which is always
+-- searched, so an empty path is sufficient.
 create or replace function touch_updated_at() returns trigger
-language plpgsql as $$
+language plpgsql
+set search_path = ''
+as $$
 begin
   new.updated_at = now();
   return new;
