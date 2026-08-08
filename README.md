@@ -59,17 +59,48 @@ lost nudge or a sleeping app delays work rather than stopping it.
 
 | # | Stage | Runs on | What happens |
 |---|---|---|---|
-| 1 | Ingest | Worker | `yt-dlp` pulls the URL, capped at 1080p, into Supabase Storage |
-| 2 | Analyze | Worker | ffmpeg `astats` samples RMS loudness every 0.5s; `silencedetect` finds pauses; peaks above a rolling baseline become clip windows |
-| 3+4 | Segment & crop | Worker | One ffmpeg pass cuts the window and scales-to-cover/centre-crops to 1080×1920 |
-| 5 | Transcribe | Worker | Whisper with word-level timestamps |
-| 7 | Hooks | Worker | Claude (`claude-opus-5`) writes 3–5 description hooks |
-| 8 | Review gate | App | Clip appears as **Ready**; needs a caption style and a hook |
-| 6 | Caption burn-in | Worker | Generates an ASS subtitle track and burns it in |
-| 9 | Upload | Worker | Reserves quota, uploads via YouTube Data API v3, records the result |
+| 1 | Ingest | Worker | `yt-dlp` pulls each URL, capped at 1080p, into Supabase Storage |
+| 2 | Analyze | Worker | Loudness envelope, silence, scene cuts, full transcript, then one scoring pass that ranks every candidate |
+| 3+4 | Segment & crop | Worker | Cuts the window, follows motion to place a 1080x1920 crop, trims dead time |
+| 5 | Transcribe | Worker | Whisper word-level timestamps on the cut clip |
+| 7 | Metadata | Worker | Hooks, five title options, description, hashtags, cover frames |
+| 8 | Review | App | Score, factor breakdown, rationale, hook restructure, caption look |
+| 6 | Caption burn-in | Worker | ASS subtitle track in the chosen preset, burned in |
+| 9 | Upload | Worker | Reserves quota, uploads, records the result |
 
-Caption burn-in is numbered 6 but happens after review — see the tradeoff
-below.
+### Moment scoring
+
+Four signals feed candidate selection: audio energy above a rolling baseline,
+silence (for snapping cuts to natural pauses), scene-change detection, and the
+transcript. Audio peaks and scene starts together produce roughly three times
+the target number of candidates, and **one** Claude call ranks all of them side
+by side — one call rather than one per candidate, because a relative ranking is
+only meaningful if the model can compare them.
+
+Each clip gets seven factors (hook, emotional intensity, curiosity, dialogue,
+pacing, visual activity, ending), a rationale quoting the clip, a category, and
+a rank within its source. The composite score is a weighted sum.
+
+**The score is a relative ranking, not a prediction.** There is no "VIRAL"
+label and no absolute percentage, because nothing here can predict view counts
+and printing a number that implies otherwise would be dressing up a guess as a
+measurement. `visual_activity` is weighted at 4% and drawn dimmed in the UI:
+without vision the model is inferring it from scene-cut counts and what the
+speech implies, and the prompt tells it to sit near 50 rather than guess.
+
+### Smart crop
+
+The crop follows motion. Frames are decoded to 96x54 grayscale, differenced
+against their predecessor, and the intensity-weighted column centroid drives a
+piecewise `crop` expression over `t`, so the window genuinely moves during the
+clip.
+
+**This is motion tracking, not face tracking.** It follows whatever moves most.
+On a static two-shot where one person gestures it will favour the gesturer; on
+a locked-off shot with a busy background it can be pulled off the subject. A
+face or saliency model would be better — this needs no model and is still much
+better than always cropping the middle. Turn it off in Settings for a fixed
+centre crop.
 
 ### How clips are chosen
 
@@ -301,10 +332,68 @@ Type checks: `npm run typecheck` in each of the two directories.
 
 ## Known gaps
 
-- The 9:16 crop is a centre crop. It has no idea where the subject is, so a
-  two-shot or an off-centre speaker will be cropped badly. Subject-aware
-  reframing would need face/saliency tracking.
+Things from the feature list that are **not** built. Listed explicitly so the
+docs do not imply more than the code does.
+
+- **Speaker diarization.** `whisper-1` returns no speaker labels, so "find
+  moments where the guest speaks" and "find arguments between X and Y" cannot
+  be answered. Needs a diarization model (pyannote, or AssemblyAI/Deepgram
+  instead of Whisper).
+- **Face-aware crop.** See Smart crop above — motion, not faces.
+- **Caption timeline editor.** Captions are generated and burned in; there is
+  no per-line UI to edit text, timing or font. The transcript is stored with
+  word timestamps, so the data is there.
+- **Video player with scrubbing and click-a-scene-to-clip.** Scenes are
+  detected and stored in the `scenes` table but there is no timeline UI over
+  them yet.
+- **Multiple variations per clip.** `variant_of` and `variant_label` exist in
+  the schema; nothing generates them.
+- **Content calendar.** `schedule_entries` exists; there is no UI and nothing
+  reads it.
+- **Performance analytics.** `clip_analytics` exists. Fetching it needs the
+  `yt-analytics.readonly` OAuth scope added and a worker stage. Note this one
+  *is* genuinely possible: YouTube Analytics exposes retention for your own
+  uploads, unlike third-party video.
+- **AI clip assistant.** The per-clip "make the hook stronger / make this 20
+  seconds" action list is not built.
+- **Style learning is shallow.** `style_profiles` accumulates averages over
+  kept vs. rejected clips and feeds them to the scorer as context. It is not a
+  trained model, and it needs at least 8 reviewed clips before it reports
+  anything.
+- **File upload.** Ingest is by URL only; there is no drag-and-drop of local
+  files.
+
+Also still true of the parts that are built:
+
 - Retry is per-stage with a fixed attempt cap; there is no backoff schedule.
-- The worker processes one job per stage per pass. It is not horizontally
-  scaled — the compare-and-swap claim is safe for multiple workers, but
-  throughput is one clip at a time per instance.
+- The worker processes one job per stage per pass. The compare-and-swap claim
+  is safe for multiple workers, but a single instance is one clip at a time.
+- **The ffmpeg and yt-dlp invocations have never been executed.** They are
+  written from documented syntax and the surrounding logic is unit-tested, but
+  no video has been through this pipeline. Expect to debug filter strings on
+  the first real run.
+
+## Cost per source
+
+Worth knowing before feeding it a 3-hour VOD:
+
+- **Whisper**: the full source is transcribed once (chunked at 10 minutes to
+  stay under the 25 MB upload cap), then each cut clip again. A 2-hour source
+  is roughly $0.75 for the source pass plus a few cents per clip.
+- **Claude**: one scoring call per source, one metadata call per clip.
+- **ffmpeg**: two encodes per clip, plus one more per caption preset if
+  `RENDER_BOTH_CAPTION_STYLES` is on.
+
+`shorts_per_source` in Settings is the main dial on all three.
+
+## Explicit non-goals
+
+- **No predicted view counts or "viral" scores.** See Moment scoring.
+- **No "most watched moment" detection.** No public API provides retention or
+  replay data for *third-party* video. Audio and transcript analysis is the
+  honest substitute and is labelled as such.
+- **No rights laundering.** The download step exists to move a video *you have
+  the rights to* into the pipeline. Nexus does not check licensing, does not
+  bypass any platform's access controls, and takes no position on what you feed
+  it. Keeping an upload private does not by itself grant redistribution rights.
+  Sourcing and rights are entirely your call and your liability.
