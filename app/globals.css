@@ -1,0 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Nexus Clips — broadcast-monitor palette.
+ * Amber is the VU lamp: it means "signal, live, attention". Violet marks
+ * anything the model wrote. Green means published. Red means over-level or
+ * failed. Nothing else gets a colour.
+ */
+:root {
+  --ink: #0b0f14;
+  --panel: #121820;
+  --panel-2: #1a222d;
+  --rule: #243040;
+  --text: #dce4ef;
+  --dim: #7a8ba3;
+  --lamp: #f0a93b;
+  --peak: #ff5a5f;
+  --synth: #9e7bff;
+  --live: #3dd68c;
+}
+
+* {
+  border-color: var(--rule);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv05" 1;
+}
+
+/* Ambient: a single faint lamp glow behind the header, nothing more. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -20% 0 auto 0;
+  height: 45vh;
+  background: radial-gradient(
+    60% 100% at 50% 0%,
+    rgba(240, 169, 59, 0.06),
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+::selection {
+  background: rgba(240, 169, 59, 0.28);
+}
+
+:focus-visible {
+  outline: 2px solid var(--lamp);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Type scale ------------------------------------------------------------- */
+.display {
+  font-family: var(--font-display), ui-sans-serif, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+}
+
+.eyebrow {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.tc {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* Surfaces --------------------------------------------------------------- */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+}
+
+.panel-inset {
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+}
+
+/* Scrollbars ------------------------------------------------------------- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--ink);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--rule);
+  border-radius: 999px;
+  border: 3px solid var(--ink);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #35455c;
+}
+
+/* The lamp pulse marks work in flight. Held to one element at a time. */
+@keyframes lamp-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.lamp-live {
+  animation: lamp-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
