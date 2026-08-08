@@ -5,8 +5,12 @@ export const DEFAULT_SETTINGS: Omit<AppSettings, "owner_id" | "updated_at"> = {
   // Off by default. The first live upload is always a deliberate act.
   auto_upload_enabled: false,
   default_caption_style: "karaoke",
+  default_caption_preset: "clean",
   clip_length_seconds: 30,
   max_clips_per_source: 8,
+  shorts_per_source: 10,
+  remove_dead_time: true,
+  smart_crop: true,
   daily_quota_limit: 10000,
   youtube_privacy_status: "public",
 };

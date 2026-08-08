@@ -5,8 +5,9 @@ import type { QuotaSnapshot } from "@/lib/types";
 const NAV = [
   { href: "/", label: "Ingest", key: "1" },
   { href: "/review", label: "Review", key: "2" },
-  { href: "/log", label: "Log", key: "3" },
-  { href: "/settings", label: "Settings", key: "4" },
+  { href: "/library", label: "Library", key: "3" },
+  { href: "/log", label: "Log", key: "4" },
+  { href: "/settings", label: "Settings", key: "5" },
 ];
 
 interface Props {

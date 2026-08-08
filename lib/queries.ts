@@ -120,6 +120,47 @@ export async function loadClips(ownerId: string): Promise<ClipWithContext[]> {
   );
 }
 
+/** Every clip for the library browser, newest source first. */
+export async function loadLibrary(ownerId: string): Promise<ClipWithContext[]> {
+  const db = createAdminClient();
+
+  const { data } = await db
+    .from("clips")
+    .select(
+      "*, source:source_videos(id, title, source_url, duration_seconds, loudness_envelope)",
+    )
+    .eq("owner_id", ownerId)
+    .order("created_at", { ascending: false })
+    .order("rank", { ascending: true })
+    .limit(300);
+
+  const clips = (data ?? []) as unknown as Array<
+    Clip & { source: ClipWithContext["source"] }
+  >;
+  if (clips.length === 0) return [];
+
+  const { data: hookRows } = await db
+    .from("hooks")
+    .select("*")
+    .in("clip_id", clips.map((c) => c.id))
+    .order("created_at", { ascending: true });
+
+  const hooksByClip = new Map<string, Hook[]>();
+  for (const hook of (hookRows ?? []) as unknown as Hook[]) {
+    const list = hooksByClip.get(hook.clip_id) ?? [];
+    list.push(hook);
+    hooksByClip.set(hook.clip_id, list);
+  }
+
+  return clips.map((clip) => ({
+    ...clip,
+    hooks: hooksByClip.get(clip.id) ?? [],
+    // The library is a browsing surface, not a player — skipping the signed
+    // URL per clip keeps a 300-row page to one round trip.
+    previewUrl: null,
+  }));
+}
+
 export interface UploadRow extends Upload {
   clip: Pick<Clip, "id" | "start_seconds" | "end_seconds"> | null;
 }

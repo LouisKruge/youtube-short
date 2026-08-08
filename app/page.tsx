@@ -15,9 +15,9 @@ export default async function IngestPage() {
       quota={quota}
       autoUpload={settings.auto_upload_enabled}
       title="Ingest"
-      subtitle="Paste a video URL. Nexus downloads it, reads the audio for high-energy moments, and cuts a vertical clip around each one."
+      subtitle="Drop in an episode, stream or VOD. Nexus reads the audio, the scene structure and the transcript, ranks every candidate moment against the others, and cuts the best ones to vertical."
     >
-      <IngestPanel initial={sources} />
+      <IngestPanel initial={sources} shortsPerSource={settings.shorts_per_source} />
     </Shell>
   );
 }

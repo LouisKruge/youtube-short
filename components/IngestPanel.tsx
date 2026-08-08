@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { ClipRadar } from "@/components/ClipRadar";
 import { LoudnessRibbon } from "@/components/LoudnessRibbon";
 import { StatusBadge } from "@/components/StatusBadge";
 import { duration, relativeTime } from "@/lib/format";
@@ -11,11 +12,22 @@ interface SourceRow extends SourceVideo {
   windows: { start: number; end: number }[];
 }
 
-export function IngestPanel({ initial }: { initial: SourceRow[] }) {
+export function IngestPanel({
+  initial,
+  shortsPerSource = 10,
+}: {
+  initial: SourceRow[];
+  shortsPerSource?: number;
+}) {
   const [sources, setSources] = useState(initial);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const lineCount = Math.max(
+    1,
+    url.split(/[\n,]/).filter((u) => u.trim().length > 0).length,
+  );
 
   const refresh = useCallback(async () => {
     try {
@@ -42,13 +54,26 @@ export function IngestPanel({ initial }: { initial: SourceRow[] }) {
     setBusy(true);
     setError(null);
     try {
+      const sourceUrls = url
+        .split(/[\n,]/)
+        .map((u) => u.trim())
+        .filter((u) => u.length > 0);
+
       const res = await fetch("/api/sources", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sourceUrl: url }),
+        body: JSON.stringify({ sourceUrls }),
       });
       const payload = await res.json();
-      if (!res.ok) throw new Error(payload.error ?? "Could not add that URL.");
+      if (!res.ok) throw new Error(payload.error ?? "Could not add those URLs.");
+
+      if (payload.rejected?.length > 0) {
+        setError(
+          `Skipped ${payload.rejected.length}: ${payload.rejected
+            .map((r: { input: string; reason: string }) => `${r.input} (${r.reason})`)
+            .join(", ")}`,
+        );
+      }
       setUrl("");
       await refresh();
     } catch (err) {
@@ -62,27 +87,30 @@ export function IngestPanel({ initial }: { initial: SourceRow[] }) {
     <div className="space-y-10">
       <form onSubmit={submit} className="panel p-5">
         <label htmlFor="source-url" className="eyebrow">
-          Source video URL
+          Source video URLs — one per line
         </label>
-        <div className="mt-3 flex flex-col gap-3 sm:flex-row">
-          <input
-            id="source-url"
-            type="url"
-            required
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://…"
-            className="panel-inset flex-1 px-4 py-3 text-sm outline-none placeholder:text-dim"
-            style={{ background: "var(--panel-2)" }}
-          />
+        <textarea
+          id="source-url"
+          required
+          rows={3}
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder={"https://…\nhttps://…"}
+          className="panel-inset mt-3 w-full resize-y px-4 py-3 text-sm outline-none placeholder:text-dim"
+          style={{ background: "var(--panel-2)" }}
+        />
+        <div className="mt-3 flex items-center gap-3">
           <button
             type="submit"
             disabled={busy || url.trim().length === 0}
             className="rounded-[3px] px-6 py-3 text-sm font-medium transition-opacity disabled:opacity-40"
             style={{ background: "var(--lamp)", color: "var(--ink)" }}
           >
-            {busy ? "Adding…" : "Add to queue"}
+            {busy ? "Adding…" : `Analyze ${lineCount === 1 ? "video" : `${lineCount} videos`}`}
           </button>
+          <span className="eyebrow">
+            each yields up to {shortsPerSource} ranked shorts
+          </span>
         </div>
         {error && (
           <p className="mt-3 text-sm" style={{ color: "var(--peak)" }} role="alert">
@@ -128,13 +156,31 @@ export function IngestPanel({ initial }: { initial: SourceRow[] }) {
                   </div>
                 </div>
 
-                <div className="mt-4">
+                <div className="mt-4 space-y-4">
                   <LoudnessRibbon
                     envelope={source.loudness_envelope}
                     durationSeconds={source.duration_seconds}
                     windows={source.windows}
                     showScale
                   />
+
+                  {(source.radar ?? []).length > 0 && (
+                    <ClipRadar
+                      entries={source.radar}
+                      durationSeconds={source.duration_seconds}
+                      live={source.status === "analyzing"}
+                    />
+                  )}
+
+                  {source.analysis && (
+                    <p className="eyebrow">
+                      {source.scene_count ?? 0} scenes ·{" "}
+                      {source.analysis.candidates_considered ?? 0} candidates
+                      considered · {source.analysis.clips_selected ?? 0} kept
+                      {source.analysis.scored_by_model === false &&
+                        " · ranked on audio only"}
+                    </p>
+                  )}
                 </div>
 
                 {source.error_message && (

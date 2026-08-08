@@ -7,6 +7,13 @@
  * against the live project after every migration.
  *
  * Without this generic every query row infers as `never`.
+ *
+ * The row shapes below MUST stay `type` aliases, not `interface`. Supabase's
+ * GenericTable requires `Row extends Record<string, unknown>`, and TypeScript
+ * only gives implicit index signatures to type aliases — an interface fails
+ * that constraint, the whole schema stops matching GenericSchema, and every
+ * query silently degrades back to `never`. The resulting errors point at the
+ * call sites, not at this file, so it is a slow one to rediscover.
  */
 
 export type Json = string | number | boolean | null | { [key: string]: Json } | Json[];
@@ -14,7 +21,7 @@ export type Json = string | number | boolean | null | { [key: string]: Json } | 
 /** Generated columns and defaults are optional on insert. */
 type Insertable<Row, Required extends keyof Row> = Partial<Row> & Pick<Row, Required>;
 
-interface SourceVideoRow {
+type SourceVideoRow = {
   id: string;
   owner_id: string;
   source_url: string;
@@ -35,7 +42,7 @@ interface SourceVideoRow {
   updated_at: string;
 }
 
-interface ClipRow {
+type ClipRow = {
   id: string;
   owner_id: string;
   source_video_id: string;
@@ -75,7 +82,7 @@ interface ClipRow {
   updated_at: string;
 }
 
-interface HookRow {
+type HookRow = {
   id: string;
   owner_id: string;
   clip_id: string;
@@ -85,7 +92,7 @@ interface HookRow {
   created_at: string;
 }
 
-interface UploadRow {
+type UploadRow = {
   id: string;
   owner_id: string;
   clip_id: string;
@@ -102,7 +109,7 @@ interface UploadRow {
   created_at: string;
 }
 
-interface SceneRow {
+type SceneRow = {
   id: string;
   owner_id: string;
   source_video_id: string;
@@ -113,13 +120,13 @@ interface SceneRow {
   created_at: string;
 }
 
-interface QuotaUsageRow {
+type QuotaUsageRow = {
   owner_id: string;
   usage_date: string;
   units_used: number;
 }
 
-interface AppSettingsRow {
+type AppSettingsRow = {
   owner_id: string;
   auto_upload_enabled: boolean;
   default_caption_style: string;
@@ -134,7 +141,7 @@ interface AppSettingsRow {
   updated_at: string;
 }
 
-interface YoutubeAccountRow {
+type YoutubeAccountRow = {
   owner_id: string;
   channel_id: string | null;
   channel_title: string | null;
@@ -146,7 +153,7 @@ interface YoutubeAccountRow {
   updated_at: string;
 }
 
-interface ScheduleEntryRow {
+type ScheduleEntryRow = {
   id: string;
   owner_id: string;
   clip_id: string;
@@ -155,7 +162,7 @@ interface ScheduleEntryRow {
   created_at: string;
 }
 
-interface ClipAnalyticsRow {
+type ClipAnalyticsRow = {
   clip_id: string;
   owner_id: string;
   views: number | null;
@@ -166,7 +173,7 @@ interface ClipAnalyticsRow {
   fetched_at: string;
 }
 
-interface StyleProfileRow {
+type StyleProfileRow = {
   owner_id: string;
   profile: Json;
   sample_size: number;

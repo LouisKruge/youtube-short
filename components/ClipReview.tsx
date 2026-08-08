@@ -2,9 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { LoudnessRibbon } from "@/components/LoudnessRibbon";
+import { ScoreBreakdown } from "@/components/ScoreBreakdown";
 import { StatusBadge } from "@/components/StatusBadge";
 import { timecode } from "@/lib/format";
-import type { CaptionStyle, ClipWithContext } from "@/lib/types";
+import {
+  CAPTION_PRESETS,
+  type CaptionPreset,
+  type CaptionStyle,
+  type ClipWithContext,
+} from "@/lib/types";
 
 interface Props {
   initial: ClipWithContext[];
@@ -112,9 +118,61 @@ export function ClipReview({
               <div className="flex items-center justify-between">
                 <StatusBadge status={clip.status} />
                 <span className="tc text-[11px] text-dim">
-                  energy {clip.peak_score?.toFixed(2) ?? "--"}
+                  {clip.dead_time_removed && clip.dead_time.length > 0
+                    ? `−${clip.dead_time
+                        .reduce((a, d) => a + (d.end - d.start), 0)
+                        .toFixed(1)}s dead`
+                    : `energy ${clip.peak_score?.toFixed(1) ?? "--"}`}
                 </span>
               </div>
+
+              <ScoreBreakdown
+                score={clip.score}
+                factors={clip.score_factors}
+                rationale={clip.rationale}
+                category={clip.category}
+                rank={clip.rank}
+              />
+
+              {clip.hook_analysis?.suggestion && !clip.hook_analysis.applied && (
+                <div
+                  className="rounded-[3px] border p-3"
+                  style={{
+                    borderColor: "var(--synth)",
+                    background: "rgba(158,123,255,.06)",
+                  }}
+                >
+                  <p className="eyebrow" style={{ color: "var(--synth)" }}>
+                    stronger opening at +{clip.hook_analysis.best_opening_at.toFixed(1)}s
+                  </p>
+                  <p className="mt-1 text-xs leading-snug">
+                    {clip.hook_analysis.suggestion}
+                  </p>
+                  {clip.hook_analysis.line && (
+                    <p className="mt-1 text-xs italic text-dim">
+                      &ldquo;{clip.hook_analysis.line}&rdquo;
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => patch(clip.id, { applyHook: true })}
+                    className="mt-2 rounded-[2px] px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+                    style={{ background: "var(--synth)", color: "var(--ink)" }}
+                  >
+                    Restructure and re-cut
+                  </button>
+                </div>
+              )}
+
+              {clip.crop_track && clip.crop_track.method === "motion" && (
+                <p className="eyebrow">
+                  crop follows motion ·{" "}
+                  {clip.crop_track.static
+                    ? "held centred"
+                    : `${clip.crop_track.segments.length} moves`}
+                </p>
+              )}
 
               {/* Where this clip sits in the source's energy profile. */}
               <LoudnessRibbon
@@ -161,14 +219,41 @@ export function ClipReview({
                 </div>
               </fieldset>
 
+              <fieldset>
+                <legend className="eyebrow mb-2">Look</legend>
+                <div className="flex flex-wrap gap-1.5">
+                  {CAPTION_PRESETS.map((preset: CaptionPreset) => {
+                    const on = clip.caption_preset === preset;
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        disabled={busy || clip.status === "uploaded"}
+                        onClick={() => patch(clip.id, { captionPreset: preset })}
+                        className="rounded-[3px] border px-2.5 py-1.5 text-[11px] transition-colors disabled:opacity-40"
+                        style={{
+                          borderColor: on ? "var(--lamp)" : "var(--rule)",
+                          color: on ? "var(--lamp)" : "var(--dim)",
+                          background: on ? "rgba(240,169,59,.08)" : "transparent",
+                        }}
+                      >
+                        {preset}
+                      </button>
+                    );
+                  })}
+                </div>
+              </fieldset>
+
               {/* Hooks — violet marks everything the model wrote. */}
-              {clip.hooks.length > 0 && (
+              {clip.hooks.filter((h) => h.kind === "hook").length > 0 && (
                 <fieldset>
                   <legend className="eyebrow mb-2" style={{ color: "var(--synth)" }}>
                     Description hook
                   </legend>
                   <div className="space-y-1.5">
-                    {clip.hooks.map((hook) => {
+                    {clip.hooks
+                      .filter((h) => h.kind === "hook")
+                      .map((hook) => {
                       const on = hook.is_selected;
                       return (
                         <button

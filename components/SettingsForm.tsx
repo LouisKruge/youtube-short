@@ -163,6 +163,83 @@ export function SettingsForm({ settings: initial, queuedCount }: Props) {
           </label>
 
           <label className="block">
+            <span className="eyebrow">Caption look</span>
+            <select
+              value={settings.default_caption_preset}
+              onChange={(e) =>
+                save({
+                  default_caption_preset: e.target
+                    .value as AppSettings["default_caption_preset"],
+                })
+              }
+              className="panel-inset mt-2 w-full px-3 py-2.5 text-sm outline-none"
+              style={{ background: "var(--panel-2)" }}
+            >
+              <option value="clean">Clean — legible, neutral</option>
+              <option value="punch">Punch — big, all-caps</option>
+              <option value="cinematic">Cinematic — serif, centred</option>
+              <option value="minimal">Minimal — small, low</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="eyebrow">Shorts per source</span>
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={settings.shorts_per_source}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  shorts_per_source: Number(e.target.value),
+                })
+              }
+              onBlur={() => save({ shorts_per_source: settings.shorts_per_source })}
+              className="panel-inset tc mt-2 w-full px-3 py-2.5 text-sm outline-none"
+              style={{ background: "var(--panel-2)" }}
+            />
+            <span className="mt-2 block text-xs leading-relaxed text-dim">
+              How many of the top-ranked moments to actually cut. Each one costs
+              a Whisper pass and two encodes, so this is a cost dial too.
+            </span>
+          </label>
+
+          <label className="flex items-start gap-3 sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={settings.smart_crop}
+              onChange={(e) => save({ smart_crop: e.target.checked })}
+              className="mt-1"
+            />
+            <span>
+              <span className="block text-sm">Follow motion when cropping to 9:16</span>
+              <span className="block text-xs leading-relaxed text-dim">
+                Tracks whatever moves most and pans the crop toward it. This is
+                motion tracking, not face tracking — on a locked-off shot with a
+                busy background it can be pulled off the subject. Off means a
+                fixed centre crop.
+              </span>
+            </span>
+          </label>
+
+          <label className="flex items-start gap-3 sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={settings.remove_dead_time}
+              onChange={(e) => save({ remove_dead_time: e.target.checked })}
+              className="mt-1"
+            />
+            <span>
+              <span className="block text-sm">Trim silence and frozen frames</span>
+              <span className="block text-xs leading-relaxed text-dim">
+                Cuts held pauses and static frames out of each clip. Never
+                touches the first second, since that is the hook.
+              </span>
+            </span>
+          </label>
+
+          <label className="block">
             <span className="eyebrow">Max clips per source</span>
             <input
               type="number"

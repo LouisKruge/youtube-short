@@ -3,7 +3,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOwner } from "@/lib/supabase/server";
 import { nudgeWorker } from "@/lib/worker";
 import type { Database } from "@/lib/supabase/database.types";
-import type { CaptionStyle, Clip } from "@/lib/types";
+import {
+  CAPTION_PRESETS,
+  LIBRARY_STATUSES,
+  type CaptionPreset,
+  type CaptionStyle,
+  type Clip,
+  type LibraryStatus,
+} from "@/lib/types";
 
 type ClipPatch = Database["public"]["Tables"]["clips"]["Update"];
 
@@ -61,7 +68,7 @@ export async function PATCH(
   if (typeof body.hookId === "string") {
     const { data: hook } = await db
       .from("hooks")
-      .select("id")
+      .select("id, kind")
       .eq("id", body.hookId)
       .eq("clip_id", clip.id)
       .eq("owner_id", ownerId)
@@ -71,9 +78,70 @@ export async function PATCH(
       return NextResponse.json({ error: "Hook not found" }, { status: 404 });
     }
 
-    // Clear then set — a partial unique index enforces one selection per clip.
-    await db.from("hooks").update({ is_selected: false }).eq("clip_id", clip.id);
+    // Clear then set within this kind — the partial unique index is per
+    // (clip, kind), so a clip can have one selected hook and one title.
+    await db
+      .from("hooks")
+      .update({ is_selected: false })
+      .eq("clip_id", clip.id)
+      .eq("kind", (hook as { kind: string }).kind);
     await db.from("hooks").update({ is_selected: true }).eq("id", body.hookId);
+  }
+
+  // Library workflow state — independent of the processing status, so it can
+  // move at any time including after publishing.
+  if (typeof body.libraryStatus === "string") {
+    if (!LIBRARY_STATUSES.includes(body.libraryStatus as LibraryStatus)) {
+      return NextResponse.json({ error: "Unknown library status" }, { status: 400 });
+    }
+    patch.library_status = body.libraryStatus;
+  }
+
+  // Visual preset. Changing it invalidates the burned-in render, so the clip
+  // has to go back through the caption stage.
+  if (typeof body.captionPreset === "string") {
+    if (!CAPTION_PRESETS.includes(body.captionPreset as CaptionPreset)) {
+      return NextResponse.json({ error: "Unknown caption preset" }, { status: 400 });
+    }
+    patch.caption_preset = body.captionPreset;
+    const key = `${body.captionPreset}:${patch.caption_style ?? clip.caption_style}`;
+    patch.caption_burned_path = clip.caption_paths?.[key] ?? null;
+  }
+
+  // Accept or reject the suggested hook restructure. Applying it changes where
+  // the clip starts, so any existing render is stale.
+  if (typeof body.applyHook === "boolean" && clip.hook_analysis) {
+    patch.hook_analysis = { ...clip.hook_analysis, applied: body.applyHook };
+    if (body.applyHook) {
+      patch.status = "pending_segment";
+      patch.caption_burned_path = null;
+      patch.caption_paths = {};
+      patch.attempts = 0;
+    }
+  }
+
+  // Cover frame choice, restricted to the extracted candidates so this cannot
+  // be pointed at an arbitrary storage path.
+  if (typeof body.coverFramePath === "string") {
+    if (!(clip.cover_candidates ?? []).includes(body.coverFramePath)) {
+      return NextResponse.json(
+        { error: "That cover frame is not one of this clip's candidates." },
+        { status: 400 },
+      );
+    }
+    patch.cover_frame_path = body.coverFramePath;
+  }
+
+  // Editable metadata.
+  if (typeof body.title === "string") patch.title = body.title.slice(0, 100);
+  if (typeof body.description === "string") {
+    patch.description = body.description.slice(0, 5000);
+  }
+  if (Array.isArray(body.hashtags)) {
+    patch.hashtags = body.hashtags
+      .map((h: unknown) => String(h ?? "").replace(/^#+/, "").trim().toLowerCase())
+      .filter((h: string) => h.length > 0)
+      .slice(0, 15);
   }
 
   // Status transition ------------------------------------------------------

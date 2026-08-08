@@ -36,6 +36,18 @@ export async function PATCH(request: Request) {
     patch.youtube_privacy_status = body.youtube_privacy_status;
   }
 
+  if (["clean", "punch", "cinematic", "minimal"].includes(body.default_caption_preset)) {
+    patch.default_caption_preset = body.default_caption_preset;
+  }
+
+  if (typeof body.remove_dead_time === "boolean") {
+    patch.remove_dead_time = body.remove_dead_time;
+  }
+
+  if (typeof body.smart_crop === "boolean") {
+    patch.smart_crop = body.smart_crop;
+  }
+
   const clampInt = (value: unknown, min: number, max: number) => {
     const n = Number(value);
     if (!Number.isFinite(n)) return null;
@@ -50,6 +62,13 @@ export async function PATCH(request: Request) {
   if (body.max_clips_per_source !== undefined) {
     const v = clampInt(body.max_clips_per_source, 1, 40);
     if (v !== null) patch.max_clips_per_source = v;
+  }
+
+  if (body.shorts_per_source !== undefined) {
+    // Each short costs a Whisper pass plus two ffmpeg encodes, so the ceiling
+    // is a cost guard as much as a UX one.
+    const v = clampInt(body.shorts_per_source, 1, 50);
+    if (v !== null) patch.shorts_per_source = v;
   }
 
   if (body.daily_quota_limit !== undefined) {
