@@ -61,18 +61,30 @@ primary_region = "dub"
     timeout = "5s"
     path = "/health"
 
-# A two-hour source is downloaded whole, decoded for the envelope, then encoded
-# twice per clip. 1 GB is not enough for 1080x1920 x264; 4 GB leaves headroom
-# for a long source and the scratch files beside it.
+# Sized from measurement, not from caution. Peak resident memory of each ffmpeg
+# stage, against a real 1080p source:
 #
-# Starting on shared CPU because the load is bursty — a few sources a day, not a
-# continuous stream — and shared instances burst well for that shape. If encodes
-# feel slow, or you start batching, move to `performance-1x`: ffmpeg will run at
-# 100% for minutes at a time and shared CPU is throttled to its baseline share
-# once the burst credit is gone. That is the one dial worth turning here.
+#   loudness envelope (decodes the whole file)     57 MB
+#   scene detection                               113 MB
+#   cut a 30s clip                                375 MB
+#   crop to 1080x1920 vertical                    442 MB
+#
+# 442 MB is the ceiling, plus roughly 100 MB for the Node process. 2 GB is
+# three times that. An earlier version of this file said 4 GB, which was a guess
+# and wrong by an order of magnitude — it is the single largest thing driving
+# the bill, so it was worth measuring.
+#
+# Memory does not grow with source length. ffmpeg streams, so a two-hour file
+# costs the same RAM as a five-minute one; only the frame size matters. Length
+# drives *disk*, which is what the volume below is for.
+#
+# Shared CPU because the load is bursty — a few sources a day, not a continuous
+# stream. If encodes feel slow, `fly scale vm performance-1x` is the dial:
+# ffmpeg runs at 100% for minutes and shared CPU throttles to its baseline once
+# the burst credit is gone.
 [[vm]]
-  size = "shared-cpu-2x"
-  memory = "4gb"
+  size = "shared-cpu-1x"
+  memory = "2gb"
 
 # Video is written to disk before it goes to Storage. Fly's rootfs is small and
 # ephemeral — a real volume keeps a long source from filling the machine.

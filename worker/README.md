@@ -211,6 +211,31 @@ change. To pin a known-good release instead:
 docker build --build-arg YTDLP_VERSION=2026.07.01 -t nexus-worker .
 ```
 
+## Sizing
+
+Peak resident memory of each ffmpeg stage, measured against a real 1080p source:
+
+| Stage | Peak |
+|---|---|
+| Loudness envelope (decodes the whole file) | 57 MB |
+| Scene detection | 113 MB |
+| Cut a 30s clip | 375 MB |
+| Crop to 1080x1920 vertical | 442 MB |
+
+So the ceiling is ~442 MB, plus roughly 100 MB for the Node process. **2 GB is
+ample; 1 GB would very likely do.** Anything advertising 4 GB as a requirement
+for this workload — including earlier versions of these files — was guessing.
+
+Memory does not grow with source length: ffmpeg streams, so a two-hour file
+costs the same RAM as a five-minute one. Only the frame size matters. Length
+drives **disk**, which is what the volume is for — a 1080p source runs roughly
+40 MB per minute, so a two-hour episode is around 5 GB before any clips are cut.
+
+CPU is the real constraint. That vertical crop encoded a 30-second clip in about
+19 seconds of wall time at 141% CPU, so ten clips is a few minutes of sustained
+load. Shared CPU handles that in bursts; sustained batching wants a dedicated
+core.
+
 ## What has been exercised
 
 The ffmpeg side of this worker has been run end to end against a synthetic
