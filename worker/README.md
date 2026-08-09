@@ -257,12 +257,23 @@ Three ways past it, cheapest first:
 2. **Run the worker on your own machine** (see above). A residential IP is not
    challenged in the same way.
 
-3. **Supply cookies.** Export a `cookies.txt` from a signed-in browser and put
-   its whole contents in the `YTDLP_COOKIES` secret:
+3. **Supply cookies.** Two steps, and the first one is easy to skip:
+
+   **a.** Export the file. Install a "Get cookies.txt" extension in a browser
+   that is signed in to YouTube, visit youtube.com, export, and save the file
+   into this `worker` directory. There is no command for this part — the file
+   has to come out of a browser.
+
+   **b.** Put its contents in the secret:
 
    ```bash
-   fly secrets set YTDLP_COOKIES="$(cat cookies.txt)" --app <your-app>
+   fly secrets set YTDLP_COOKIES="$(cat cookies.txt)" --app <your-app>       # mac/linux
+   fly secrets set YTDLP_COOKIES="$(Get-Content cookies.txt -Raw)" --app <your-app>   # powershell
    ```
+
+   If the file is not there, the shell substitutes nothing and the secret is set
+   to an empty string. That is harmless — the worker treats empty as "no
+   cookies" — but it looks like it worked when it did not.
 
    The worker writes it into the per-job scratch directory, hands it to yt-dlp,
    and deletes it with the rest of the job.
