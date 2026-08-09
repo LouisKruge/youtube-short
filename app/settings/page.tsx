@@ -1,6 +1,8 @@
-import { QuotaMeter } from "@/components/QuotaMeter";
+import { AppShell, PageHeader } from "@/components/shell/AppShell";
 import { SettingsForm } from "@/components/SettingsForm";
-import { Shell } from "@/components/Shell";
+import { Panel, PanelHeader, PanelSection } from "@/components/ui/Panel";
+import { Note, Status, type Tone } from "@/components/ui/Status";
+import { Kbd } from "@/components/ui/Tooltip";
 import { pageContext } from "@/lib/page-context";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { workerHealth } from "@/lib/worker";
@@ -9,179 +11,193 @@ export const dynamic = "force-dynamic";
 
 interface Credential {
   name: string;
-  configured: boolean;
+  tone: Tone;
+  state: string;
   detail: string;
 }
 
+const SHORTCUTS: Array<{ keys: string[]; label: string }> = [
+  { keys: ["⌘", "K"], label: "Command palette and search" },
+  { keys: ["/"], label: "Search" },
+  { keys: ["1", "–", "7"], label: "Jump to a section" },
+  { keys: ["["], label: "Collapse the sidebar" },
+  { keys: ["J", "K"], label: "Walk the queue" },
+  { keys: ["Space"], label: "Play or pause the monitor" },
+  { keys: [",", "."], label: "Step one frame" },
+];
+
 export default async function SettingsPage() {
-  const { ownerId, settings, quota } = await pageContext();
+  const { ownerId, email, settings, quota, processing } = await pageContext();
   const db = createAdminClient();
 
-  const [{ data: channel }, { count: queuedCount }, { data: history }, worker] =
-    await Promise.all([
-      db
-        .from("youtube_accounts")
-        .select("channel_title, channel_id, connected_at")
-        .eq("owner_id", ownerId)
-        .maybeSingle(),
-      db
-        .from("clips")
-        .select("id", { count: "exact", head: true })
-        .eq("owner_id", ownerId)
-        .eq("status", "queued"),
-      db
-        .from("quota_usage")
-        .select("usage_date, units_used")
-        .eq("owner_id", ownerId)
-        .order("usage_date", { ascending: false })
-        .limit(14),
-      workerHealth(),
-    ]);
+  const [{ data: channel }, { count: queuedCount }, worker] = await Promise.all([
+    db
+      .from("youtube_accounts")
+      .select("channel_title, channel_id, connected_at")
+      .eq("owner_id", ownerId)
+      .maybeSingle(),
+    db
+      .from("clips")
+      .select("id", { count: "exact", head: true })
+      .eq("owner_id", ownerId)
+      .eq("status", "queued"),
+    workerHealth(),
+  ]);
 
-  // Secrets live in environment variables, never in the database — so this
-  // page reports whether each one is configured, not what it is.
+  // Secrets live in environment variables, never in the database — so this page
+  // reports whether each one is configured, not what it is.
   const credentials: Credential[] = [
     {
       name: "Anthropic API key",
-      configured: Boolean(process.env.ANTHROPIC_API_KEY),
-      detail: "Writes the description hooks",
+      tone: process.env.ANTHROPIC_API_KEY ? "done" : "attention",
+      state: process.env.ANTHROPIC_API_KEY ? "configured" : "missing",
+      detail: "Scores candidate moments and writes hooks and metadata",
     },
     {
       name: "OpenAI API key",
-      configured: Boolean(process.env.OPENAI_API_KEY),
-      detail: "Whisper transcription on the worker",
+      tone: process.env.OPENAI_API_KEY ? "done" : "attention",
+      state: process.env.OPENAI_API_KEY ? "configured" : "missing",
+      detail: "Whisper transcription, word-level, on the worker",
     },
     {
       name: "Google OAuth client",
-      configured: Boolean(
-        process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET,
-      ),
+      tone:
+        process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+          ? "done"
+          : "attention",
+      state:
+        process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+          ? "configured"
+          : "missing",
       detail: "YouTube Data API v3 uploads",
     },
     {
       name: "Worker service",
-      configured: worker,
+      tone: worker ? "done" : "attention",
+      state: worker ? "reachable" : "unreachable",
       detail: worker
-        ? "Reachable — ffmpeg, yt-dlp and Whisper run here"
-        : "Unreachable. Download and rendering will not run until this is up.",
+        ? "ffmpeg, yt-dlp and Whisper run here"
+        : "Nothing will download, cut or render until this is up",
     },
   ];
 
   return (
-    <Shell
-      active="/settings"
+    <AppShell
+      crumbs={[{ label: "Settings" }]}
       quota={quota}
       autoUpload={settings.auto_upload_enabled}
-      title="Settings"
-      subtitle="The upload gate, pipeline defaults, and the credentials this deployment is running on."
+      processing={processing}
+      email={email}
     >
-      <div className="grid gap-5 lg:grid-cols-[1.6fr_1fr]">
+      <PageHeader
+        title="Settings"
+        description="The upload gate, pipeline defaults, and what this deployment is running on."
+      />
+
+      <div className="grid gap-5 xl:grid-cols-[1.5fr_1fr]">
         <SettingsForm settings={settings} queuedCount={queuedCount ?? 0} />
 
         <div className="space-y-5">
-          {/* YouTube channel */}
-          <section className="panel p-6">
-            <h2 className="display text-2xl">YouTube channel</h2>
-            {channel?.channel_id ? (
-              <>
-                <p className="mt-4 text-sm">{channel.channel_title}</p>
-                <p className="tc mt-1 text-xs text-dim">{channel.channel_id}</p>
-                <form action="/api/auth/youtube/disconnect" method="post" className="mt-4">
-                  <button
-                    type="submit"
-                    className="text-xs text-dim underline underline-offset-4 hover:text-[color:var(--peak)]"
+          {/* Channel ----------------------------------------------------- */}
+          <Panel>
+            <PanelHeader
+              title="YouTube channel"
+              actions={
+                <Status
+                  tone={channel?.channel_id ? "done" : "idle"}
+                  label={channel?.channel_id ? "connected" : "not connected"}
+                />
+              }
+            />
+            <PanelSection>
+              {channel?.channel_id ? (
+                <>
+                  <p className="text-base text-fg">{channel.channel_title}</p>
+                  <p className="t-num mt-1 text-xs text-fg-4">{channel.channel_id}</p>
+                  <form action="/api/auth/youtube/disconnect" method="post" className="mt-3">
+                    <button
+                      type="submit"
+                      className="h-6 rounded px-2 text-xs text-fg-3 transition-colors duration-fast ease-ease hover:bg-s2 hover:text-fg"
+                    >
+                      Disconnect channel
+                    </button>
+                  </form>
+                </>
+              ) : (
+                <>
+                  <p className="max-w-prose text-base leading-relaxed text-fg-2">
+                    Nexus needs permission to upload to one channel. You will be
+                    sent to Google to authorize it.
+                  </p>
+                  <a
+                    href="/api/auth/youtube/start"
+                    className="mt-3 inline-flex h-7 items-center rounded border border-fg bg-fg px-3 text-sm font-medium text-bg transition-colors duration-fast ease-ease hover:bg-white"
                   >
-                    Disconnect channel
-                  </button>
-                </form>
-              </>
-            ) : (
-              <>
-                <p className="mt-3 text-sm leading-relaxed text-dim">
-                  Nexus needs permission to upload to one channel. You will be
-                  sent to Google to authorize it.
-                </p>
-                <a
-                  href="/api/auth/youtube/start"
-                  className="mt-4 inline-block rounded-[3px] px-4 py-2.5 text-sm font-medium"
-                  style={{ background: "var(--lamp)", color: "var(--ink)" }}
-                >
-                  Connect channel
-                </a>
-              </>
-            )}
-          </section>
+                    Connect channel
+                  </a>
+                </>
+              )}
+            </PanelSection>
+          </Panel>
 
-          {/* Quota */}
-          <section className="panel p-6">
-            <h2 className="display text-2xl">Quota</h2>
-            <div className="mt-4">
-              <QuotaMeter quota={quota} detailed />
-            </div>
+          {/* Credentials ------------------------------------------------- */}
+          <Panel>
+            <PanelHeader title="Credentials" />
+            <PanelSection>
+              <ul className="divide-y divide-line">
+                {credentials.map((credential) => (
+                  <li
+                    key={credential.name}
+                    className="flex items-start justify-between gap-4 py-2.5 first:pt-0 last:pb-0"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-sm text-fg">{credential.name}</span>
+                      <span className="mt-0.5 block max-w-prose text-xs leading-relaxed text-fg-3">
+                        {credential.detail}
+                      </span>
+                    </span>
+                    <span className="shrink-0 pt-0.5">
+                      <Status tone={credential.tone} label={credential.state} />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <Note className="mt-3">
+                Keys are read from environment variables and never stored in the
+                database. Change them where you deploy.
+              </Note>
+            </PanelSection>
+          </Panel>
 
-            {history && history.length > 0 && (
-              <div className="mt-5">
-                <p className="eyebrow mb-2">Last 14 days</p>
-                <div className="flex items-end gap-[3px]" style={{ height: 44 }}>
-                  {[...history].reverse().map((day) => {
-                    const pct = Math.min(
-                      1,
-                      (day.units_used as number) / quota.limit,
-                    );
-                    return (
-                      <div
-                        key={day.usage_date as string}
-                        title={`${day.usage_date}: ${(day.units_used as number).toLocaleString()} units`}
-                        className="flex-1 rounded-t-[1px]"
-                        style={{
-                          height: `${Math.max(4, pct * 100)}%`,
-                          background:
-                            pct >= 1 ? "var(--peak)" : "var(--lamp)",
-                          opacity: 0.85,
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            <p className="mt-5 text-xs leading-relaxed text-dim">
-              Need more than {quota.uploadsPerDay} uploads a day? Google grants
-              increases through a manual application in the Cloud Console —
-              Nexus cannot request one for you, and it takes weeks.
-            </p>
-          </section>
-
-          {/* Credentials */}
-          <section className="panel p-6">
-            <h2 className="display text-2xl">Credentials</h2>
-            <p className="mt-2 text-xs leading-relaxed text-dim">
-              Keys are read from environment variables and never stored in the
-              database. Change them where you deploy.
-            </p>
-            <ul className="mt-4 space-y-3">
-              {credentials.map((cred) => (
-                <li key={cred.name} className="flex items-start gap-3">
-                  <span
-                    className="mt-[6px] block h-[6px] w-[6px] shrink-0 rounded-full"
-                    style={{
-                      background: cred.configured
-                        ? "var(--live)"
-                        : "var(--peak)",
-                    }}
-                    aria-hidden="true"
-                  />
-                  <span>
-                    <span className="block text-sm">{cred.name}</span>
-                    <span className="block text-xs text-dim">{cred.detail}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
+          {/* Keyboard --------------------------------------------------- */}
+          <Panel>
+            <PanelHeader title="Keyboard" />
+            <PanelSection>
+              <ul className="divide-y divide-line">
+                {SHORTCUTS.map((shortcut) => (
+                  <li
+                    key={shortcut.label}
+                    className="flex items-center justify-between gap-4 py-2 first:pt-0 last:pb-0"
+                  >
+                    <span className="text-sm text-fg-2">{shortcut.label}</span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      {shortcut.keys.map((key, i) =>
+                        key === "–" ? (
+                          <span key={i} className="text-xs text-fg-4">
+                            –
+                          </span>
+                        ) : (
+                          <Kbd key={i}>{key}</Kbd>
+                        ),
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </PanelSection>
+          </Panel>
         </div>
       </div>
-    </Shell>
+    </AppShell>
   );
 }

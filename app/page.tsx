@@ -1,23 +1,32 @@
-import { IngestPanel } from "@/components/IngestPanel";
-import { Shell } from "@/components/Shell";
+import { AutoRefresh } from "@/components/AutoRefresh";
+import { AppShell, PageHeader } from "@/components/shell/AppShell";
+import { Overview } from "@/components/screens/Overview";
 import { pageContext } from "@/lib/page-context";
-import { loadSources } from "@/lib/queries";
+import { loadOverview } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
-export default async function IngestPage() {
-  const { ownerId, settings, quota } = await pageContext();
-  const sources = await loadSources(ownerId);
+export default async function OverviewPage() {
+  const { ownerId, email, settings, quota, processing } = await pageContext();
+  const data = await loadOverview(ownerId);
 
   return (
-    <Shell
-      active="/"
+    <AppShell
+      crumbs={[{ label: "Overview" }]}
       quota={quota}
       autoUpload={settings.auto_upload_enabled}
-      title="Ingest"
-      subtitle="Drop in an episode, stream or VOD. Nexus reads the audio, the scene structure and the transcript, ranks every candidate moment against the others, and cuts the best ones to vertical."
+      processing={processing}
+      email={email}
     >
-      <IngestPanel initial={sources} shortsPerSource={settings.shorts_per_source} />
-    </Shell>
+      {/* Fast while the worker holds something, slow when the board is still. */}
+      <AutoRefresh intervalMs={processing > 0 ? 5000 : 30000} />
+
+      <PageHeader
+        title="Nexus Clips"
+        description="Content intelligence workstation."
+      />
+
+      <Overview data={data} shortsPerSource={settings.shorts_per_source} />
+    </AppShell>
   );
 }

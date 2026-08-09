@@ -1,315 +1,301 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { Button } from "@/components/ui/Button";
+import { Input, Select, SettingRow, Switch } from "@/components/ui/Field";
+import { ConfirmModal } from "@/components/ui/Modal";
+import { Panel, PanelHeader, PanelSection } from "@/components/ui/Panel";
+import { Note } from "@/components/ui/Status";
+import { Segmented } from "@/components/ui/Tabs";
+import { SaveState } from "@/components/ui/Toast";
 import type { AppSettings } from "@/lib/types";
 
-interface Props {
+type Save = "idle" | "saving" | "saved" | "error";
+
+/**
+ * Settings.
+ *
+ * Every control saves on change; there is no Save button, and the state marker
+ * in the panel header is the only feedback needed. Numeric fields commit on blur
+ * rather than per keystroke, so typing "30" does not write a 3 on the way.
+ *
+ * Auto-upload is the one control with a confirmation, because it is the only one
+ * whose effect leaves this machine.
+ */
+export function SettingsForm({
+  settings: initial,
+  queuedCount,
+}: {
   settings: AppSettings;
   queuedCount: number;
-}
-
-export function SettingsForm({ settings: initial, queuedCount }: Props) {
+}) {
   const [settings, setSettings] = useState(initial);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [confirmingAutoUpload, setConfirmingAutoUpload] = useState(false);
+  const [state, setState] = useState<Save>("idle");
+  const [confirming, setConfirming] = useState(false);
+  const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  async function save(patch: Partial<AppSettings>) {
-    setSaving(true);
-    setSaved(false);
+  const save = useCallback(async (patch: Partial<AppSettings>) => {
+    setState("saving");
+    if (clearTimer.current) clearTimeout(clearTimer.current);
     try {
       const res = await fetch("/api/settings", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(patch),
       });
-      if (res.ok) {
-        setSettings(await res.json());
-        setSaved(true);
-        setTimeout(() => setSaved(false), 2500);
-      }
-    } finally {
-      setSaving(false);
+      if (!res.ok) throw new Error("save failed");
+      setSettings(await res.json());
+      setState("saved");
+      clearTimer.current = setTimeout(() => setState("idle"), 2200);
+    } catch {
+      setState("error");
     }
+  }, []);
+
+  /** Local edit now, write on blur — for fields typed digit by digit. */
+  function numberField(
+    key: keyof AppSettings,
+    props: { min: number; max?: number; step?: number },
+  ) {
+    // The width sits on a wrapper, not on the input: the control's own `w-full`
+    // resolves against a shrink-to-fit parent, so a width class on the input
+    // itself loses to the element's intrinsic size and every field ends up a
+    // different length.
+    return (
+      <span className="block w-[104px]">
+        <Input
+          mono
+          type="number"
+          className="text-right"
+          value={String(settings[key] ?? "")}
+          min={props.min}
+          max={props.max}
+          step={props.step}
+          onChange={(e) =>
+            setSettings({ ...settings, [key]: Number(e.target.value) })
+          }
+          onBlur={() => save({ [key]: settings[key] } as Partial<AppSettings>)}
+          aria-label={String(key).replace(/_/g, " ")}
+        />
+      </span>
+    );
   }
 
-  function toggleAutoUpload() {
-    if (!settings.auto_upload_enabled && !confirmingAutoUpload) {
-      // First time on: make the operator look at what is about to go out.
-      setConfirmingAutoUpload(true);
-      return;
-    }
-    setConfirmingAutoUpload(false);
-    void save({ auto_upload_enabled: !settings.auto_upload_enabled });
-  }
+  const uploadsAtCeiling = Math.floor(settings.daily_quota_limit / 1600);
 
   return (
-    <div className="space-y-5">
-      {/* The gate. */}
-      <section className="panel p-6">
-        <div className="flex flex-wrap items-start justify-between gap-6">
-          <div className="max-w-lg">
-            <h2 className="display text-2xl">Auto-upload</h2>
-            <p className="mt-2 text-sm leading-relaxed text-dim">
-              While this is off, approved clips queue up and nothing reaches
-              YouTube. Turn it on and every approved clip publishes on the next
-              cron run, up to the daily quota, with no further approval.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={toggleAutoUpload}
-            disabled={saving}
-            role="switch"
-            aria-checked={settings.auto_upload_enabled}
-            className="relative h-9 w-16 shrink-0 rounded-full border transition-colors disabled:opacity-50"
-            style={{
-              background: settings.auto_upload_enabled
-                ? "rgba(61,214,140,.18)"
-                : "var(--panel-2)",
-              borderColor: settings.auto_upload_enabled
-                ? "var(--live)"
-                : "var(--rule)",
-            }}
-          >
-            <span className="sr-only">
-              {settings.auto_upload_enabled ? "Turn auto-upload off" : "Turn auto-upload on"}
-            </span>
+    // A settings row is a label and its control. In a 1300px column they end
+    // up a screen apart and stop reading as one thing, so the form keeps its own
+    // measure regardless of how much room the shell has.
+    <div className="max-w-[720px] space-y-5">
+      {/* The gate --------------------------------------------------------- */}
+      <Panel>
+        <PanelHeader
+          title="Auto-upload"
+          actions={
             <span
-              className="absolute top-1 block h-6 w-6 rounded-full transition-all"
-              style={{
-                left: settings.auto_upload_enabled ? "2.1rem" : "0.25rem",
-                background: settings.auto_upload_enabled
-                  ? "var(--live)"
-                  : "var(--dim)",
-              }}
-            />
-          </button>
+              className={
+                settings.auto_upload_enabled ? "t-label text-fg" : "t-label"
+              }
+            >
+              {settings.auto_upload_enabled ? "armed" : "held"}
+            </span>
+          }
+        />
+        <div className="flex items-start justify-between gap-6 px-3 py-3">
+          <p className="max-w-prose text-base leading-relaxed text-fg-2">
+            While this is held, approved clips queue up and nothing reaches
+            YouTube. Armed, every approved clip publishes on the next worker
+            pass up to the daily quota, with no further approval.
+          </p>
+          <Switch
+            checked={settings.auto_upload_enabled}
+            label="Auto-upload"
+            onChange={(next) => {
+              // Only arming needs a confirmation. Disarming is always safe.
+              if (next) setConfirming(true);
+              else void save({ auto_upload_enabled: false });
+            }}
+          />
         </div>
+      </Panel>
 
-        {confirmingAutoUpload && (
-          <div
-            className="mt-5 rounded-[3px] border p-4"
-            style={{ borderColor: "var(--lamp)", background: "rgba(240,169,59,.06)" }}
-          >
-            <p className="text-sm">
-              {queuedCount > 0
-                ? `${queuedCount} clip${queuedCount === 1 ? "" : "s"} will publish to your channel on the next cron run.`
-                : "Approved clips will publish to your channel automatically from now on."}
-            </p>
-            <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                onClick={toggleAutoUpload}
-                className="rounded-[3px] px-4 py-2 text-sm font-medium"
-                style={{ background: "var(--lamp)", color: "var(--ink)" }}
-              >
-                Turn on auto-upload
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmingAutoUpload(false)}
-                className="rounded-[3px] border px-4 py-2 text-sm text-dim"
-              >
-                Cancel
-              </button>
-            </div>
+      {/* Selection -------------------------------------------------------- */}
+      <Panel>
+        <PanelHeader title="Selection" actions={<SaveState state={state} />} />
+
+        <PanelSection>
+          <div className="divide-y divide-line">
+            <SettingRow
+              label="Clips per source"
+              hint="How many of the top-ranked moments to actually cut. Each one costs a Whisper pass and two encodes, so this is the main cost dial."
+            >
+              {numberField("shorts_per_source", { min: 1, max: 50 })}
+            </SettingRow>
+
+            <SettingRow
+              label="Hard ceiling per source"
+              hint="An upper bound the picker will not exceed even if it finds more good candidates."
+            >
+              {numberField("max_clips_per_source", { min: 1, max: 40 })}
+            </SettingRow>
+
+            <SettingRow
+              label="Clip length"
+              hint="Target seconds per clip. The picker snaps to nearby silences, so the real length varies by a second or two."
+            >
+              {numberField("clip_length_seconds", { min: 10, max: 60 })}
+            </SettingRow>
           </div>
-        )}
-      </section>
+        </PanelSection>
+      </Panel>
 
-      {/* Pipeline defaults. */}
-      <section className="panel p-6">
-        <h2 className="display text-2xl">Pipeline</h2>
+      {/* Rendering -------------------------------------------------------- */}
+      <Panel>
+        <PanelHeader title="Rendering" actions={<SaveState state={state} />} />
 
-        <div className="mt-5 grid gap-6 sm:grid-cols-2">
-          <label className="block">
-            <span className="eyebrow">Default caption style</span>
-            <select
-              value={settings.default_caption_style}
-              onChange={(e) =>
-                save({
-                  default_caption_style: e.target.value as "karaoke" | "static",
-                })
-              }
-              className="panel-inset mt-2 w-full px-3 py-2.5 text-sm outline-none"
-              style={{ background: "var(--panel-2)" }}
+        <PanelSection>
+          <div className="divide-y divide-line">
+            <SettingRow
+              label="Default caption timing"
+              hint="Applied to new clips. Any clip can be switched individually before approval."
             >
-              <option value="karaoke">Word by word (karaoke)</option>
-              <option value="static">Full lines (static)</option>
-            </select>
-          </label>
+              <Segmented
+                size="sm"
+                options={[
+                  { value: "karaoke", label: "Word" },
+                  { value: "static", label: "Line" },
+                ]}
+                value={settings.default_caption_style}
+                onChange={(next) =>
+                  save({
+                    default_caption_style:
+                      next as AppSettings["default_caption_style"],
+                  })
+                }
+              />
+            </SettingRow>
 
-          <label className="block">
-            <span className="eyebrow">Clip length — seconds</span>
-            <input
-              type="number"
-              min={10}
-              max={60}
-              value={settings.clip_length_seconds}
-              onChange={(e) =>
-                setSettings({
-                  ...settings,
-                  clip_length_seconds: Number(e.target.value),
-                })
-              }
-              onBlur={() =>
-                save({ clip_length_seconds: settings.clip_length_seconds })
-              }
-              className="panel-inset tc mt-2 w-full px-3 py-2.5 text-sm outline-none"
-              style={{ background: "var(--panel-2)" }}
-            />
-          </label>
+            <SettingRow label="Default caption look">
+              <Select
+                className="w-[184px]"
+                value={settings.default_caption_preset}
+                onChange={(e) =>
+                  save({
+                    default_caption_preset: e.target
+                      .value as AppSettings["default_caption_preset"],
+                  })
+                }
+                aria-label="Default caption look"
+              >
+                <option value="clean">Clean — neutral, thin outline</option>
+                <option value="punch">Punch — heavy, high contrast</option>
+                <option value="cinematic">Cinematic — wide, lower third</option>
+                <option value="minimal">Minimal — small, unboxed</option>
+              </Select>
+            </SettingRow>
 
-          <label className="block">
-            <span className="eyebrow">Caption look</span>
-            <select
-              value={settings.default_caption_preset}
-              onChange={(e) =>
-                save({
-                  default_caption_preset: e.target
-                    .value as AppSettings["default_caption_preset"],
-                })
-              }
-              className="panel-inset mt-2 w-full px-3 py-2.5 text-sm outline-none"
-              style={{ background: "var(--panel-2)" }}
+            <SettingRow
+              label="Follow motion when cropping"
+              hint="Pans the 9:16 window toward whatever moves most. This is motion tracking, not face tracking — on a locked-off shot with a busy background it can be pulled off the subject. Off means a fixed centre crop."
             >
-              <option value="clean">Clean — legible, neutral</option>
-              <option value="punch">Punch — big, all-caps</option>
-              <option value="cinematic">Cinematic — serif, centred</option>
-              <option value="minimal">Minimal — small, low</option>
-            </select>
-          </label>
+              <Switch
+                checked={settings.smart_crop}
+                label="Follow motion when cropping"
+                onChange={(next) => save({ smart_crop: next })}
+              />
+            </SettingRow>
 
-          <label className="block">
-            <span className="eyebrow">Shorts per source</span>
-            <input
-              type="number"
-              min={1}
-              max={50}
-              value={settings.shorts_per_source}
-              onChange={(e) =>
-                setSettings({
-                  ...settings,
-                  shorts_per_source: Number(e.target.value),
-                })
-              }
-              onBlur={() => save({ shorts_per_source: settings.shorts_per_source })}
-              className="panel-inset tc mt-2 w-full px-3 py-2.5 text-sm outline-none"
-              style={{ background: "var(--panel-2)" }}
-            />
-            <span className="mt-2 block text-xs leading-relaxed text-dim">
-              How many of the top-ranked moments to actually cut. Each one costs
-              a Whisper pass and two encodes, so this is a cost dial too.
-            </span>
-          </label>
-
-          <label className="flex items-start gap-3 sm:col-span-2">
-            <input
-              type="checkbox"
-              checked={settings.smart_crop}
-              onChange={(e) => save({ smart_crop: e.target.checked })}
-              className="mt-1"
-            />
-            <span>
-              <span className="block text-sm">Follow motion when cropping to 9:16</span>
-              <span className="block text-xs leading-relaxed text-dim">
-                Tracks whatever moves most and pans the crop toward it. This is
-                motion tracking, not face tracking — on a locked-off shot with a
-                busy background it can be pulled off the subject. Off means a
-                fixed centre crop.
-              </span>
-            </span>
-          </label>
-
-          <label className="flex items-start gap-3 sm:col-span-2">
-            <input
-              type="checkbox"
-              checked={settings.remove_dead_time}
-              onChange={(e) => save({ remove_dead_time: e.target.checked })}
-              className="mt-1"
-            />
-            <span>
-              <span className="block text-sm">Trim silence and frozen frames</span>
-              <span className="block text-xs leading-relaxed text-dim">
-                Cuts held pauses and static frames out of each clip. Never
-                touches the first second, since that is the hook.
-              </span>
-            </span>
-          </label>
-
-          <label className="block">
-            <span className="eyebrow">Max clips per source</span>
-            <input
-              type="number"
-              min={1}
-              max={40}
-              value={settings.max_clips_per_source}
-              onChange={(e) =>
-                setSettings({
-                  ...settings,
-                  max_clips_per_source: Number(e.target.value),
-                })
-              }
-              onBlur={() =>
-                save({ max_clips_per_source: settings.max_clips_per_source })
-              }
-              className="panel-inset tc mt-2 w-full px-3 py-2.5 text-sm outline-none"
-              style={{ background: "var(--panel-2)" }}
-            />
-          </label>
-
-          <label className="block">
-            <span className="eyebrow">Upload visibility</span>
-            <select
-              value={settings.youtube_privacy_status}
-              onChange={(e) =>
-                save({
-                  youtube_privacy_status: e.target
-                    .value as AppSettings["youtube_privacy_status"],
-                })
-              }
-              className="panel-inset mt-2 w-full px-3 py-2.5 text-sm outline-none"
-              style={{ background: "var(--panel-2)" }}
+            <SettingRow
+              label="Trim silence and frozen frames"
+              hint="Cuts held pauses and static frames out of each clip. Never touches the first second, since that is the hook."
             >
-              <option value="public">Public</option>
-              <option value="unlisted">Unlisted</option>
-              <option value="private">Private</option>
-            </select>
-          </label>
+              <Switch
+                checked={settings.remove_dead_time}
+                label="Trim silence and frozen frames"
+                onChange={(next) => save({ remove_dead_time: next })}
+              />
+            </SettingRow>
+          </div>
+        </PanelSection>
+      </Panel>
 
-          <label className="block sm:col-span-2">
-            <span className="eyebrow">Daily quota ceiling — units</span>
-            <input
-              type="number"
-              min={1600}
-              step={1600}
-              value={settings.daily_quota_limit}
-              onChange={(e) =>
-                setSettings({
-                  ...settings,
-                  daily_quota_limit: Number(e.target.value),
-                })
-              }
-              onBlur={() => save({ daily_quota_limit: settings.daily_quota_limit })}
-              className="panel-inset tc mt-2 w-full px-3 py-2.5 text-sm outline-none"
-              style={{ background: "var(--panel-2)" }}
-            />
-            <span className="mt-2 block text-xs leading-relaxed text-dim">
-              Google grants 10,000 units a day by default. Each upload costs
-              1,600, so that is {Math.floor(settings.daily_quota_limit / 1600)}{" "}
-              upload{Math.floor(settings.daily_quota_limit / 1600) === 1 ? "" : "s"}.
-              Only raise this after Google approves a quota increase — setting a
-              higher number here does not grant you one.
-            </span>
-          </label>
-        </div>
+      {/* Publishing ------------------------------------------------------- */}
+      <Panel>
+        <PanelHeader title="Publishing" actions={<SaveState state={state} />} />
 
-        <p className="eyebrow mt-5" style={{ color: saved ? "var(--live)" : undefined }}>
-          {saving ? "saving…" : saved ? "saved" : "changes save automatically"}
-        </p>
-      </section>
+        <PanelSection>
+          <div className="divide-y divide-line">
+            <SettingRow
+              label="Upload visibility"
+              hint="Keeping an upload private does not by itself grant you redistribution rights for the source material."
+            >
+              <Segmented
+                size="sm"
+                options={[
+                  { value: "public", label: "Public" },
+                  { value: "unlisted", label: "Unlisted" },
+                  { value: "private", label: "Private" },
+                ]}
+                value={settings.youtube_privacy_status}
+                onChange={(next) =>
+                  save({
+                    youtube_privacy_status:
+                      next as AppSettings["youtube_privacy_status"],
+                  })
+                }
+              />
+            </SettingRow>
+
+            <SettingRow
+              label="Daily quota ceiling"
+              hint={`Units. Google grants 10,000 a day by default and each upload costs 1,600 — so this ceiling allows ${uploadsAtCeiling} upload${uploadsAtCeiling === 1 ? "" : "s"}. Only raise it after Google approves an increase; a bigger number here does not grant you one.`}
+            >
+              {numberField("daily_quota_limit", { min: 1600, step: 1600 })}
+            </SettingRow>
+          </div>
+        </PanelSection>
+      </Panel>
+
+      <Note>
+        Changes save as you make them. The worker reads these on its next pass,
+        so a clip already mid-render keeps the settings it started with.
+      </Note>
+
+      <ConfirmModal
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        onConfirm={() => {
+          setConfirming(false);
+          void save({ auto_upload_enabled: true });
+        }}
+        title="Arm auto-upload"
+        confirmLabel="Arm auto-upload"
+        body={
+          queuedCount > 0
+            ? `${queuedCount} approved clip${queuedCount === 1 ? "" : "s"} will publish to your channel on the next worker pass, and every clip you approve after that will follow automatically.`
+            : "Every clip you approve from now on will publish to your channel automatically, without a further prompt."
+        }
+      />
     </div>
+  );
+}
+
+/** A small helper the settings page uses for the connect/disconnect actions. */
+export function ConnectAction({
+  href,
+  label,
+}: {
+  href: string;
+  label: string;
+}) {
+  return (
+    <Button
+      variant="primary"
+      size="md"
+      onClick={() => (window.location.href = href)}
+    >
+      {label}
+    </Button>
   );
 }

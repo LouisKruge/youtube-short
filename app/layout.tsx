@@ -1,24 +1,25 @@
-import type { Metadata } from "next";
-import { Bricolage_Grotesque, Inter_Tight, JetBrains_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const display = Bricolage_Grotesque({
-  subsets: ["latin"],
-  weight: ["600", "700", "800"],
-  variable: "--font-display",
-  display: "swap",
-});
-
-const body = Inter_Tight({
+/**
+ * Two families, and they do different jobs.
+ *
+ * Inter carries every word and every large figure — its tabular numerals are
+ * what make a score read as a measurement rather than a headline. JetBrains
+ * Mono is reserved for timecodes, IDs and unit counts: things an operator
+ * compares column-to-column, where a fixed advance width is the point.
+ */
+const sans = Inter({
   subsets: ["latin"],
   weight: ["400", "500", "600"],
-  variable: "--font-body",
+  variable: "--font-sans",
   display: "swap",
 });
 
 const mono = JetBrains_Mono({
   subsets: ["latin"],
-  weight: ["400", "500", "700"],
+  weight: ["400", "500"],
   variable: "--font-mono",
   display: "swap",
 });
@@ -26,7 +27,12 @@ const mono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Nexus Clips",
   description:
-    "Cut vertical clips from a source video by audio energy, caption them, and publish to YouTube within quota.",
+    "Content intelligence workstation. Ingest a source, rank its moments, cut and caption vertical clips, publish within quota.",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#080808",
+  colorScheme: "dark",
 };
 
 export default function RootLayout({
@@ -35,7 +41,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
+    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body>{children}</body>
     </html>
   );

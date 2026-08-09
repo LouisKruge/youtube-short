@@ -1,6 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "@/components/ui/Button";
+import { Field, Input } from "@/components/ui/Field";
+import { Panel, PanelHeader, PanelSection } from "@/components/ui/Panel";
+import { Alert, Note, Status } from "@/components/ui/Status";
+import { AuthFrame } from "@/components/shell/Wordmark";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
@@ -26,59 +31,72 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative z-10 flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="mb-8 flex items-baseline gap-2">
-          <span className="display text-3xl">Nexus</span>
-          <span className="eyebrow">clips</span>
-        </div>
-
-        {sent ? (
-          <div className="panel p-6">
-            <h1 className="display text-2xl">Check your inbox</h1>
-            <p className="mt-3 text-sm leading-relaxed text-dim">
-              We sent a sign-in link to {email}. Open it on this device to
-              continue.
+    <AuthFrame
+      footer={
+        <Note>
+          Nexus Clips is a single-operator workstation. There is no sign-up — the
+          deployment belongs to whoever holds its environment variables.
+        </Note>
+      }
+    >
+      {sent ? (
+        <Panel>
+          <PanelHeader
+            title="Link sent"
+            actions={<Status tone="done" label="sent" />}
+          />
+          <PanelSection>
+            <p className="max-w-prose text-base leading-relaxed text-fg-2">
+              A sign-in link is on its way to{" "}
+              <span className="text-fg">{email}</span>. Open it on this device —
+              the link carries the session, so it has to land in this browser.
             </p>
-          </div>
-        ) : (
-          <form onSubmit={submit} className="panel p-6">
-            <h1 className="display text-2xl">Sign in</h1>
-            <p className="mt-2 text-sm leading-relaxed text-dim">
-              Nexus Clips is a single-operator dashboard. Sign in with the email
-              that owns this deployment.
-            </p>
-
-            <label htmlFor="email" className="eyebrow mt-6 block">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="panel-inset mt-2 w-full px-4 py-3 text-sm outline-none"
-              style={{ background: "var(--panel-2)" }}
-            />
-
             <button
-              type="submit"
-              disabled={busy}
-              className="mt-4 w-full rounded-[3px] px-4 py-3 text-sm font-medium disabled:opacity-40"
-              style={{ background: "var(--lamp)", color: "var(--ink)" }}
+              type="button"
+              onClick={() => setSent(false)}
+              className="mt-4 h-6 rounded px-2 text-xs text-fg-3 transition-colors duration-fast ease-ease hover:bg-s2 hover:text-fg"
             >
-              {busy ? "Sending…" : "Send sign-in link"}
+              Use a different address
             </button>
+          </PanelSection>
+        </Panel>
+      ) : (
+        <Panel>
+          <PanelHeader title="Sign in" />
+          <form onSubmit={submit}>
+            <PanelSection>
+              <Field
+                label="Email"
+                htmlFor="email"
+                hint="You will get a one-time link. No password to keep."
+              >
+                <Input
+                  id="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="h-9"
+                />
+              </Field>
 
-            {error && (
-              <p className="mt-3 text-sm" style={{ color: "var(--peak)" }} role="alert">
-                {error}
-              </p>
-            )}
+              <Button
+                type="submit"
+                variant="primary"
+                size="lg"
+                block
+                disabled={busy || email.trim().length === 0}
+                className="mt-4"
+              >
+                {busy ? "Sending…" : "Send sign-in link"}
+              </Button>
+
+              {error && <Alert className="mt-3">{error}</Alert>}
+            </PanelSection>
           </form>
-        )}
-      </div>
-    </div>
+        </Panel>
+      )}
+    </AuthFrame>
   );
 }

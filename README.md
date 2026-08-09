@@ -118,6 +118,34 @@ operator.
 
 ---
 
+## The interface
+
+Seven screens, one shell. Monochrome by rule — there is no accent colour
+anywhere, because this is a place where you judge images and tinted chrome
+biases that judgement. Hierarchy is brightness and position; state is shape
+(a hollow dot waits, a filled dot is done, a square needs attention).
+
+| Screen | What it is for |
+|---|---|
+| **Overview** | What is happening, what needs a decision, what came before. The active source with its live pipeline readout, the ranked opportunities, recent sources. |
+| **Projects** | Every source as a dense sortable table — length, clips, scenes, stage, updated. |
+| **Projects → workspace** | The monitor. Source video, transport with frame-stepping, and one playhead shared by the waveform, the candidate strip and the caption track. Right-hand panel lists the clips and inspects the selected one. |
+| **Library** | Every clip ever cut, with shelves (unreviewed → shortlisted → editing → exported → published → archived), multi-select, batch moves, and full-text search across every transcript. |
+| **Radar** | A monitoring instrument. Sources under analysis with their candidate strips filling in, plus every detection across every source in one ranked feed. |
+| **Queue** | Decision-first. One list, one monitor, one inspector; `J`/`K` walk it. |
+| **Analytics** | Publishing history and quota spend — from Nexus's own records, not from YouTube. |
+
+**Keyboard.** `⌘K` or `/` opens the palette (which is also the search field —
+type two characters and it searches every transcript you have ingested).
+`1`–`7` jump between sections, `[` collapses the sidebar, `J`/`K` walk the
+queue, `Space` plays, `,`/`.` step a frame.
+
+**Ingest** takes a local file or a URL. Local files go straight from the browser
+to Supabase Storage over a signed upload URL and enter the pipeline at the
+analyze stage; URLs are fetched by the worker with yt-dlp.
+
+---
+
 ## Setup
 
 ### 1. Supabase
@@ -343,9 +371,12 @@ docs do not imply more than the code does.
 - **Caption timeline editor.** Captions are generated and burned in; there is
   no per-line UI to edit text, timing or font. The transcript is stored with
   word timestamps, so the data is there.
-- **Video player with scrubbing and click-a-scene-to-clip.** Scenes are
-  detected and stored in the `scenes` table but there is no timeline UI over
-  them yet.
+- **Click-a-scene-to-clip.** Scene boundaries are detected, stored and drawn
+  as ticks on the project timeline, but there is no "cut a clip from here"
+  action on one.
+- **Caption text editing.** The caption track shows every timed word and
+  highlights the one under the playhead, but the words are read-only — changing
+  them would mean writing back to the transcript and re-rendering.
 - **Multiple variations per clip.** `variant_of` and `variant_label` exist in
   the schema; nothing generates them.
 - **Content calendar.** `schedule_entries` exists; there is no UI and nothing
@@ -360,8 +391,6 @@ docs do not imply more than the code does.
   kept vs. rejected clips and feeds them to the scorer as context. It is not a
   trained model, and it needs at least 8 reviewed clips before it reports
   anything.
-- **File upload.** Ingest is by URL only; there is no drag-and-drop of local
-  files.
 
 Also still true of the parts that are built:
 

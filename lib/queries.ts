@@ -1,7 +1,8 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { MEDIA_BUCKET } from "@/lib/media";
 import type { Clip, ClipWithContext, Hook, SourceVideo, Upload } from "@/lib/types";
 
-export const MEDIA_BUCKET = "nexus-media";
+export { MEDIA_BUCKET };
 
 /** Signed preview URL for a private storage object. */
 async function signedUrl(path: string | null): Promise<string | null> {
@@ -159,6 +160,190 @@ export async function loadLibrary(ownerId: string): Promise<ClipWithContext[]> {
     // URL per clip keeps a 300-row page to one round trip.
     previewUrl: null,
   }));
+}
+
+/**
+ * One source with everything the project workspace needs: the signed media URL,
+ * its scenes, and its clips in rank order.
+ */
+export interface ProjectDetail {
+  source: SourceVideo;
+  sourceUrl: string | null;
+  scenes: number[];
+  clips: ClipWithContext[];
+}
+
+export async function loadProject(
+  ownerId: string,
+  sourceId: string,
+): Promise<ProjectDetail | null> {
+  const db = createAdminClient();
+
+  const { data: source } = await db
+    .from("source_videos")
+    .select("*")
+    .eq("owner_id", ownerId)
+    .eq("id", sourceId)
+    .maybeSingle();
+
+  if (!source) return null;
+  const row = source as unknown as SourceVideo;
+
+  const [{ data: clipRows }, { data: sceneRows }, signed] = await Promise.all([
+    db
+      .from("clips")
+      .select("*")
+      .eq("owner_id", ownerId)
+      .eq("source_video_id", sourceId)
+      .order("rank", { ascending: true, nullsFirst: false })
+      .order("start_seconds", { ascending: true }),
+    db
+      .from("scenes")
+      .select("start_seconds")
+      .eq("source_video_id", sourceId)
+      .order("start_seconds", { ascending: true })
+      .limit(600),
+    signedUrl(row.storage_path),
+  ]);
+
+  const clips = (clipRows ?? []) as unknown as Clip[];
+
+  const { data: hookRows } =
+    clips.length > 0
+      ? await db
+          .from("hooks")
+          .select("*")
+          .in("clip_id", clips.map((c) => c.id))
+          .order("created_at", { ascending: true })
+      : { data: [] };
+
+  const hooksByClip = new Map<string, Hook[]>();
+  for (const hook of (hookRows ?? []) as unknown as Hook[]) {
+    const list = hooksByClip.get(hook.clip_id) ?? [];
+    list.push(hook);
+    hooksByClip.set(hook.clip_id, list);
+  }
+
+  // Only the rendered clips get a signed URL. Signing all of them on a source
+  // with thirty candidates is thirty round trips for previews nobody opened.
+  const withUrls = await Promise.all(
+    clips.map(async (clip) => ({
+      ...clip,
+      hooks: hooksByClip.get(clip.id) ?? [],
+      source: {
+        id: row.id,
+        title: row.title,
+        source_url: row.source_url,
+        duration_seconds: row.duration_seconds,
+        loudness_envelope: row.loudness_envelope,
+      },
+      previewUrl: clip.caption_burned_path
+        ? await signedUrl(clip.caption_burned_path)
+        : null,
+    })),
+  );
+
+  return {
+    source: row,
+    sourceUrl: signed,
+    scenes: ((sceneRows ?? []) as Array<{ start_seconds: number }>).map((s) =>
+      Number(s.start_seconds),
+    ),
+    clips: withUrls,
+  };
+}
+
+export interface Overview {
+  /** The source worth looking at now: in flight if any, else most recent. */
+  active: SourceRow | null;
+  activeClips: { total: number; ready: number; published: number };
+  /** Highest-scoring clips not yet dealt with, across every source. */
+  opportunities: Array<
+    Pick<
+      Clip,
+      "id" | "source_video_id" | "start_seconds" | "end_seconds" | "score" | "rank" | "status"
+    > & { sourceTitle: string | null }
+  >;
+  recent: SourceRow[];
+  counts: { needsReview: number; queued: number; published: number };
+}
+
+/**
+ * The Overview read.
+ *
+ * Deliberately one pass over a bounded set rather than a live aggregate per
+ * card: the dashboard answers "what is happening, what needs me, what next",
+ * and all three come out of the same fifty rows.
+ */
+export async function loadOverview(ownerId: string): Promise<Overview> {
+  const db = createAdminClient();
+  const sources = await loadSources(ownerId);
+
+  const IN_FLIGHT = ["pending_download", "downloading", "downloaded", "analyzing", "uploading"];
+  const active =
+    sources.find((s) => IN_FLIGHT.includes(s.status)) ?? sources[0] ?? null;
+
+  const [{ data: clipRows }, needsReview, queued, published, activeCounts] =
+    await Promise.all([
+      db
+        .from("clips")
+        .select("id, source_video_id, start_seconds, end_seconds, score, rank, status")
+        .eq("owner_id", ownerId)
+        .in("status", ["ready_for_review", "segmented", "transcribing", "queued"])
+        .not("score", "is", null)
+        .order("score", { ascending: false })
+        .limit(8),
+      db
+        .from("clips")
+        .select("id", { count: "exact", head: true })
+        .eq("owner_id", ownerId)
+        .eq("status", "ready_for_review"),
+      db
+        .from("clips")
+        .select("id", { count: "exact", head: true })
+        .eq("owner_id", ownerId)
+        .eq("status", "queued"),
+      db
+        .from("clips")
+        .select("id", { count: "exact", head: true })
+        .eq("owner_id", ownerId)
+        .eq("status", "uploaded"),
+      active
+        ? db
+            .from("clips")
+            .select("status")
+            .eq("owner_id", ownerId)
+            .eq("source_video_id", active.id)
+        : Promise.resolve({ data: [] as Array<{ status: string }> }),
+    ]);
+
+  const titles = new Map(sources.map((s) => [s.id, s.title]));
+  const activeStatuses = ((activeCounts.data ?? []) as Array<{ status: string }>).map(
+    (c) => c.status,
+  );
+
+  return {
+    active,
+    activeClips: {
+      total: activeStatuses.filter((s) => s !== "rejected").length,
+      ready: activeStatuses.filter((s) =>
+        ["ready_for_review", "queued", "uploaded"].includes(s),
+      ).length,
+      published: activeStatuses.filter((s) => s === "uploaded").length,
+    },
+    opportunities: ((clipRows ?? []) as unknown as Overview["opportunities"]).map(
+      (clip) => ({
+        ...clip,
+        sourceTitle: titles.get(clip.source_video_id) ?? null,
+      }),
+    ),
+    recent: sources.slice(0, 6),
+    counts: {
+      needsReview: needsReview.count ?? 0,
+      queued: queued.count ?? 0,
+      published: published.count ?? 0,
+    },
+  };
 }
 
 export interface UploadRow extends Upload {

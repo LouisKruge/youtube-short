@@ -1,15 +1,39 @@
-import Link from "next/link";
+import { ButtonLink } from "@/components/ui/Button";
+import { Panel, PanelHeader, PanelSection } from "@/components/ui/Panel";
+import { Note, Status } from "@/components/ui/Status";
+import { Wordmark } from "@/components/shell/Wordmark";
 import { missingCoreEnv, optionalEnvStatus } from "@/lib/config-check";
 
 export const dynamic = "force-dynamic";
 
+const STEPS: Array<{ text: React.ReactNode }> = [
+  {
+    text: (
+      <>
+        Apply <Code>supabase/migrations/0001_init.sql</Code> to your Supabase
+        project, then <Code>0002</Code> and <Code>0003</Code>.
+      </>
+    ),
+  },
+  {
+    text: <>Enable the Email provider in Supabase Auth — sign-in is a magic link.</>,
+  },
+  {
+    text: (
+      <>
+        Deploy the worker (see <Code>worker/README.md</Code>). Nothing is
+        downloaded, cut, captioned or uploaded without it — this is not optional.
+      </>
+    ),
+  },
+];
+
 /**
  * Configuration triage.
  *
- * Reachable without a session by design — when Supabase is unconfigured
- * there is no way to sign in, and an unreachable diagnostics page is not a
- * diagnostics page. It reports only whether each variable is *set*, never its
- * value.
+ * Reachable without a session by design — when Supabase is unconfigured there is
+ * no way to sign in, and an unreachable diagnostics page is not a diagnostics
+ * page. It reports only whether each variable is *set*, never its value.
  */
 export default function SetupPage() {
   const missing = missingCoreEnv();
@@ -17,102 +41,119 @@ export default function SetupPage() {
   const ready = missing.length === 0;
 
   return (
-    <div className="relative z-10 mx-auto min-h-screen w-full max-w-3xl px-4 py-16 sm:px-8">
-      <div className="mb-10 flex items-baseline gap-2">
-        <span className="display text-3xl">Nexus</span>
-        <span className="eyebrow">clips</span>
-      </div>
+    <div className="mx-auto min-h-screen w-full max-w-[680px] px-6 py-16">
+      <Wordmark className="mb-10" />
 
-      <h1 className="display text-4xl sm:text-5xl">
+      <h1 className="t-hero">
         {ready ? "Configuration looks complete" : "Finish configuring this deployment"}
       </h1>
-
-      <p className="mt-4 max-w-2xl text-sm leading-relaxed text-dim">
+      <p className="mt-2 max-w-prose text-base leading-relaxed text-fg-3">
         {ready
           ? "The required environment variables are all set. If you landed here from an error, redeploy so the new values are picked up."
-          : "Nexus needs a Supabase project before it can render anything. Set the variables below in your host's environment settings, then redeploy."}
+          : "Nexus needs a Supabase project before it can render anything. Set the variables below where you deploy, then redeploy."}
       </p>
 
-      {!ready && (
-        <section className="panel mt-8 p-6">
-          <h2 className="eyebrow" style={{ color: "var(--peak)" }}>
-            Required — missing
-          </h2>
-          <ul className="mt-4 space-y-4">
-            {missing.map((v) => (
-              <li key={v.name}>
-                <code className="tc text-sm" style={{ color: "var(--peak)" }}>
-                  {v.name}
-                </code>
-                <p className="mt-1 text-xs text-dim">{v.detail}</p>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-6 text-xs leading-relaxed text-dim">
-            On Vercel: <strong>Project Settings → Environment Variables</strong>.
-            Adding a variable does not affect the running deployment — you must
-            redeploy afterwards.
-          </p>
-        </section>
-      )}
+      <div className="mt-8 space-y-5">
+        {!ready && (
+          <Panel>
+            <PanelHeader
+              title="Required"
+              count={missing.length}
+              actions={<Status tone="attention" label="missing" />}
+            />
+            <PanelSection>
+              <ul className="divide-y divide-line">
+                {missing.map((variable) => (
+                  <li key={variable.name} className="py-2.5 first:pt-0 last:pb-0">
+                    <Code strong>{variable.name}</Code>
+                    <p className="mt-1 max-w-prose text-xs leading-relaxed text-fg-3">
+                      {variable.detail}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+              <Note className="mt-3">
+                On Vercel these live in Project Settings → Environment Variables.
+                Adding one does not affect the running deployment; you have to
+                redeploy afterwards.
+              </Note>
+            </PanelSection>
+          </Panel>
+        )}
 
-      <section className="panel mt-5 p-6">
-        <h2 className="eyebrow">Feature credentials</h2>
-        <p className="mt-2 text-xs leading-relaxed text-dim">
-          The app runs without these; the features that depend on them do not.
-        </p>
-        <ul className="mt-4 space-y-3">
-          {optional.map((v) => (
-            <li key={v.name} className="flex items-start gap-3">
-              <span
-                className="mt-[7px] block h-[6px] w-[6px] shrink-0 rounded-full"
-                style={{ background: v.configured ? "var(--live)" : "var(--dim)" }}
-                aria-hidden="true"
-              />
-              <span>
-                <code className="tc text-sm">{v.name}</code>
-                <span className="block text-xs text-dim">{v.detail}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
+        <Panel>
+          <PanelHeader title="Feature credentials" />
+          <PanelSection>
+            <p className="mb-3 max-w-prose text-xs leading-relaxed text-fg-3">
+              The app runs without these. The features that depend on them do not.
+            </p>
+            <ul className="divide-y divide-line">
+              {optional.map((variable) => (
+                <li
+                  key={variable.name}
+                  className="flex items-start justify-between gap-4 py-2.5 first:pt-0 last:pb-0"
+                >
+                  <span className="min-w-0">
+                    <Code>{variable.name}</Code>
+                    <span className="mt-0.5 block max-w-prose text-xs leading-relaxed text-fg-3">
+                      {variable.detail}
+                    </span>
+                  </span>
+                  <span className="shrink-0 pt-0.5">
+                    <Status
+                      tone={variable.configured ? "done" : "idle"}
+                      label={variable.configured ? "set" : "not set"}
+                    />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </PanelSection>
+        </Panel>
 
-      <section className="panel mt-5 p-6">
-        <h2 className="eyebrow">Then</h2>
-        <ol className="mt-4 space-y-3 text-sm text-dim">
-          <li>
-            <span className="tc mr-2" style={{ color: "var(--lamp)" }}>
-              1
-            </span>
-            Apply <code className="tc">supabase/migrations/0001_init.sql</code> to
-            your Supabase project.
-          </li>
-          <li>
-            <span className="tc mr-2" style={{ color: "var(--lamp)" }}>
-              2
-            </span>
-            Enable the Email provider in Supabase Auth — sign-in is a magic link.
-          </li>
-          <li>
-            <span className="tc mr-2" style={{ color: "var(--lamp)" }}>
-              3
-            </span>
-            Deploy the worker (see <code className="tc">worker/README.md</code>).
-            Nothing is downloaded, cut, captioned or uploaded without it.
-          </li>
-        </ol>
-      </section>
+        <Panel>
+          <PanelHeader title="Then" />
+          <PanelSection>
+            <ol className="divide-y divide-line">
+              {STEPS.map((step, i) => (
+                <li key={i} className="flex gap-3 py-2.5 first:pt-0 last:pb-0">
+                  <span className="t-num shrink-0 text-xs text-fg-4">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span className="max-w-prose text-sm leading-relaxed text-fg-2">
+                    {step.text}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </PanelSection>
+        </Panel>
+      </div>
 
       {ready && (
-        <Link
-          href="/"
-          className="mt-8 inline-block rounded-[3px] px-5 py-3 text-sm font-medium"
-          style={{ background: "var(--lamp)", color: "var(--ink)" }}
-        >
-          Go to the dashboard
-        </Link>
+        <ButtonLink href="/" variant="primary" size="lg" className="mt-8">
+          Open the workstation
+        </ButtonLink>
       )}
     </div>
+  );
+}
+
+/** Inline code, set in the figure font so paths align with the rest of the UI. */
+function Code({
+  children,
+  strong,
+}: {
+  children: React.ReactNode;
+  strong?: boolean;
+}) {
+  return (
+    <code
+      className={
+        strong ? "t-num text-sm text-fg" : "t-num text-sm text-fg-2"
+      }
+    >
+      {children}
+    </code>
   );
 }

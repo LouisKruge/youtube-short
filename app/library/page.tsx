@@ -1,23 +1,29 @@
-import { LibraryBrowser } from "@/components/LibraryBrowser";
-import { Shell } from "@/components/Shell";
+import { AppShell, PageHeader } from "@/components/shell/AppShell";
+import { LibraryScreen } from "@/components/screens/LibraryScreen";
 import { pageContext } from "@/lib/page-context";
 import { loadLibrary } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
 export default async function LibraryPage() {
-  const { ownerId, settings, quota } = await pageContext();
+  const { ownerId, email, settings, quota, processing } = await pageContext();
   const clips = await loadLibrary(ownerId);
 
   return (
-    <Shell
-      active="/library"
+    <AppShell
+      crumbs={[{ label: "Library" }]}
       quota={quota}
       autoUpload={settings.auto_upload_enabled}
-      title="Library"
-      subtitle="Every clip ever cut, and full-text search across everything anyone said in every source you have ingested."
+      processing={processing}
+      email={email}
+      width="wide"
     >
-      <LibraryBrowser initial={clips} />
-    </Shell>
+      <PageHeader
+        title="Library"
+        description="Every clip ever cut, and full-text search across everything said in every source."
+      />
+
+      <LibraryScreen clips={clips} />
+    </AppShell>
   );
 }
