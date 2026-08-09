@@ -142,7 +142,7 @@ deploy rather than discovered afterwards.
 ```bash
 cd worker
 fly launch --no-deploy --copy-config   # uses the committed fly.toml
-fly volumes create nexus_media --size 20 --region dub   # required by [mounts]
+fly volumes create nexus_media --size 20 --region lhr   # required by [mounts]
 fly secrets set WORKER_SHARED_SECRET=... SUPABASE_URL=... \
   SUPABASE_SERVICE_ROLE_KEY=... OPENAI_API_KEY=... ANTHROPIC_API_KEY=...
 fly deploy

@@ -111,6 +111,33 @@ Write-Host "   region: $region"
 Write-Host "   volume: $volume"
 Write-Host "   URL:    $url"
 
+# --- Region ------------------------------------------------------------------
+
+Write-Step "Checking the region"
+
+# Fly region codes are three letters and not always the airport you expect -
+# there is no Dublin, for instance. Checking here turns a wrong code into a list
+# of the right ones, instead of a failure part-way through app creation.
+$regionList = fly platform regions 2>$null | Out-String
+if ($LASTEXITCODE -eq 0 -and $regionList -match "\S") {
+  if ($regionList -match ("(?m)^\s*" + [regex]::Escape($region) + "\s")) {
+    Write-Ok "$region is valid"
+  } else {
+    Write-Host ""
+    Write-Host $regionList
+    Stop-With @"
+"$region" is not a Fly region. The list above is the real one.
+
+Pick the code nearest your Supabase project (it is in Ireland), then change
+the  primary_region =  line in fly.toml and run this again. lhr, ams and cdg
+are all reasonable.
+"@
+  }
+} else {
+  # Not fatal: if the listing cannot be read, let app creation be the judge.
+  Write-Ok "could not list regions - continuing"
+}
+
 # --- App ---------------------------------------------------------------------
 
 Write-Step "Creating the app (skipped if it already exists)"
@@ -123,7 +150,15 @@ if ($LASTEXITCODE -eq 0) {
   # without them fails in ways that do not point back at the cause.
   fly launch --no-deploy --copy-config --name $app --region $region --yes
   if ($LASTEXITCODE -ne 0) {
-    Stop-With "Could not create the app. If the name is taken, change the `app =` line in fly.toml and run this again."
+    Stop-With @"
+Could not create the app. Two things usually cause this:
+
+  - the name is taken. Fly app names are unique across every account.
+    Change the  app =  line in fly.toml and run this again.
+
+  - the region code is wrong. Run  fly platform regions  to see the real
+    list, then change the  primary_region =  line in fly.toml to match.
+"@
   }
   Write-Ok "created"
 }

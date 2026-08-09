@@ -32,10 +32,15 @@
 # Fly app names are globally unique across every account. If `fly launch` still
 # says this one is taken, change it here, and the URL changes to match.
 app = "nexus-clips-worker-30af5d"
-# Dublin, to sit in the same region as the Supabase project (eu-west-1). This
-# worker pushes and pulls multi-gigabyte media to Storage on every job, so
-# co-locating is worth more here than it would be for a normal API service.
-primary_region = "dub"
+# London: the closest Fly region to the Supabase project, which is in AWS
+# eu-west-1 (Ireland). This worker pushes and pulls multi-gigabyte media to
+# Storage on every job, so staying on the same side of the Atlantic is worth
+# more here than it would be for an ordinary API service.
+#
+# Fly has no Dublin region - an earlier version of this file said "dub", which
+# is not a Fly region code at all and fails at app creation. `fly platform
+# regions` prints the real list; ams and cdg are the next-nearest alternatives.
+primary_region = "lhr"
 
 [build]
   dockerfile = "Dockerfile"
