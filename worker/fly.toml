@@ -2,7 +2,7 @@
 #
 # Run from this directory, in this order:
 #
-#   fly launch --no-deploy --copy-config
+#   fly launch --no-deploy --copy-config    # takes the name below
 #
 #   # The [mounts] block below needs a volume that already exists, in the same
 #   # region as the app. `fly deploy` fails outright without it, and the error
@@ -26,9 +26,12 @@
 # A WORKER_URL that "does not resolve" means no app exists at that name. A
 # stopped app still resolves — you would get a refused connection instead.
 
-# PLACEHOLDER. `fly launch` replaces this with whatever name you are actually
-# given. Never copy it into WORKER_URL without checking `fly apps list` first.
-app = "nexus-clips-worker"
+# A concrete name with a random suffix, so it is almost certainly free on Fly
+# and the hostname is knowable before deploying: https://nexus-clips-worker-30af5d.fly.dev
+#
+# Fly app names are globally unique across every account. If `fly launch` still
+# says this one is taken, change it here, and the URL changes to match.
+app = "nexus-clips-worker-30af5d"
 # Dublin, to sit in the same region as the Supabase project (eu-west-1). This
 # worker pushes and pulls multi-gigabyte media to Storage on every job, so
 # co-locating is worth more here than it would be for a normal API service.

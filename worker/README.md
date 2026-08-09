@@ -89,7 +89,23 @@ Dockerfile itself and prompts for each secret — nothing is stored in the repo.
 Point at this directory, let it use the `Dockerfile`, and set the environment
 variables from `.env.example`. Health check path is `/health`.
 
-### Fly.io
+### Fly.io — scripted
+
+```bash
+cd worker
+./deploy-fly.sh
+```
+
+Creates the app, creates the volume the `[mounts]` block requires, prompts for
+the secrets, deploys, waits for `/health` to answer, and prints the exact
+variables to paste into Vercel. It stops at the first failure rather than
+leaving a half-built app, and skips anything that already exists, so it is safe
+to run again after fixing something.
+
+The app name lives in `fly.toml`, which means the hostname is known before you
+deploy rather than discovered afterwards.
+
+### Fly.io — by hand
 
 ```bash
 cd worker
