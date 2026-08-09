@@ -110,10 +110,23 @@ variables from `.env.example`. Health check path is `/health`.
 
 ### Fly.io — scripted
 
+Mac or Linux:
+
 ```bash
 cd worker
 ./deploy-fly.sh
 ```
+
+Windows PowerShell:
+
+```powershell
+cd worker
+.\deploy-fly.ps1
+```
+
+The two do the same thing. The PowerShell one targets Windows PowerShell 5.1 —
+the version that ships with Windows — so it avoids syntax only PowerShell 7
+understands.
 
 Creates the app, creates the volume the `[mounts]` block requires, prompts for
 the secrets, deploys, waits for `/health` to answer, and prints the exact
