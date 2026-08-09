@@ -45,7 +45,13 @@ surfaces in the dashboard.
 
 ## Deploying
 
-### Railway / Render
+### Render (no local tooling needed)
+
+`render.yaml` is a blueprint. In the dashboard: **New → Blueprint**, point it at
+this repository, set the root directory to `worker`. Render builds the
+Dockerfile itself and prompts for each secret — nothing is stored in the repo.
+
+### Railway
 
 Point at this directory, let it use the `Dockerfile`, and set the environment
 variables from `.env.example`. Health check path is `/health`.
@@ -54,7 +60,7 @@ variables from `.env.example`. Health check path is `/health`.
 
 ```bash
 cd worker
-fly launch --dockerfile Dockerfile
+fly launch --no-deploy --copy-config   # uses the committed fly.toml
 fly secrets set WORKER_SHARED_SECRET=... SUPABASE_URL=... \
   SUPABASE_SERVICE_ROLE_KEY=... OPENAI_API_KEY=... ANTHROPIC_API_KEY=...
 fly deploy
@@ -101,3 +107,32 @@ cp .env.example .env
 npm install
 npm run dev
 ```
+
+
+## Keeping downloads working
+
+`yt-dlp` tracks YouTube's player, which changes often enough that yt-dlp ships a
+release every few weeks. The image installs the **latest** release at build time
+rather than a fixed version, because a pin is reproducible right up until
+extraction breaks and then it is simply broken.
+
+If downloads start failing with `Failed to extract any player response`, that is
+what a stale binary looks like — **rebuild the image**. Nothing else needs to
+change. To pin a known-good release instead:
+
+```bash
+docker build --build-arg YTDLP_VERSION=2026.07.01 -t nexus-worker .
+```
+
+## What has been exercised
+
+The ffmpeg side of this worker has been run end to end against a synthetic
+source: loudness envelope, silence detection, scene detection, motion crop
+tracking, dead-time removal, the two-pass segment encode, ASS burn-in across all
+four presets in both timings, and cover-frame extraction. The generated filter
+strings — the piecewise crop expression and the select/aselect predicates, which
+are the parts with awkward escaping — produce correct output.
+
+Not yet exercised against a real job: `yt-dlp` downloading (needs network access
+to the source), Whisper transcription, the Claude scoring call, and the YouTube
+upload. Those need credentials rather than a video.

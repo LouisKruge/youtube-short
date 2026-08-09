@@ -1,0 +1,45 @@
+# Render blueprint for the Nexus Clips worker.
+#
+# In the Render dashboard: New → Blueprint, point it at this repository, and set
+# the root directory to `worker`. Render builds the Dockerfile itself, so there
+# is nothing to build or push locally.
+#
+# The five secrets below are marked sync:false — Render will prompt for each one
+# rather than reading it from this file, so no key ever lands in the repo.
+#
+# Afterwards, set WORKER_URL (the service's .onrender.com address) and the same
+# WORKER_SHARED_SECRET in the Vercel project, and redeploy it.
+
+services:
+  - type: web
+    name: nexus-clips-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    # x264 on 1080p needs real memory; the free instance type will be killed
+    # partway through the first encode.
+    plan: standard
+    autoDeploy: false
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: MEDIA_DIR
+        value: /tmp/nexus-media
+      - key: WORKER_SHARED_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Only needed once you connect a YouTube channel and turn auto-upload on.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false

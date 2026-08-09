@@ -1,0 +1,50 @@
+# Fly.io deployment for the Nexus Clips worker.
+#
+# Run from this directory:
+#
+#   fly launch --no-deploy --copy-config --name <your-app-name>
+#   fly secrets set WORKER_SHARED_SECRET=... SUPABASE_URL=... \
+#     SUPABASE_SERVICE_ROLE_KEY=... OPENAI_API_KEY=... ANTHROPIC_API_KEY=...
+#   fly deploy
+#
+# Then set WORKER_URL (https://<your-app-name>.fly.dev) and the same
+# WORKER_SHARED_SECRET in the Vercel project, and redeploy it.
+
+app = "nexus-clips-worker"
+primary_region = "cdg"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  MEDIA_DIR = "/data/nexus-media"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # The worker must stay up: it polls Supabase for queued jobs on its own
+  # schedule. A machine that has been suspended is a queue that never drains,
+  # and the nudge from the app is an optimisation, not the trigger.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/health"
+
+# A two-hour source is downloaded whole, decoded for the envelope, then encoded
+# twice per clip. 1 GB of RAM is not enough for 1080p x264; 2 GB is the floor.
+[[vm]]
+  size = "performance-1x"
+  memory = "4gb"
+
+# Video is written to disk before it goes to Storage. Fly's rootfs is small and
+# ephemeral — a real volume keeps a long source from filling the machine.
+[mounts]
+  source = "nexus_media"
+  destination = "/data"
