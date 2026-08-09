@@ -79,6 +79,57 @@ export function AddMedia({
     });
   }, []);
 
+  /**
+   * PUTs the file with real progress.
+   *
+   * fetch cannot report upload progress — there is no event for it — so a
+   * multi-gigabyte transfer would sit at an invented percentage for half an
+   * hour. XMLHttpRequest is the older API and the only one that reports bytes
+   * sent, which is the difference between "working" and "frozen".
+   */
+  const putWithProgress = useCallback(
+    (
+      url: string,
+      file: File,
+      token: string,
+      onProgress: (fraction: number) => void,
+    ): Promise<void> =>
+      new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", url, true);
+        xhr.setRequestHeader("content-type", file.type || "video/mp4");
+        xhr.setRequestHeader("x-ingest-token", token);
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) onProgress(event.loaded / event.total);
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+            return;
+          }
+          let message = `The worker rejected the upload (${xhr.status}).`;
+          try {
+            const body = JSON.parse(xhr.responseText);
+            if (body?.error) message = body.error;
+          } catch {
+            // Non-JSON body; the status line is all there is.
+          }
+          reject(new Error(message));
+        };
+        xhr.onerror = () =>
+          reject(
+            new Error(
+              "The connection to the worker failed. Check it is running and " +
+                "reachable at the address in WORKER_URL.",
+            ),
+          );
+        xhr.onabort = () => reject(new Error("Upload cancelled."));
+        xhr.send(file);
+      }),
+    [],
+  );
+
   const uploadOne = useCallback(
     async (file: File, index: number) => {
       const setTransfer = (patch: Partial<Transfer>) =>
@@ -101,25 +152,34 @@ export function AddMedia({
         const opened = await openRes.json();
         if (!openRes.ok) throw new Error(opened.error ?? "Could not start the upload.");
 
-        // uploadToSignedUrl does not expose progress, so the transfer shows an
-        // indeterminate state until it resolves. Better than a fake percentage.
-        setTransfer({ progress: null });
+        if (opened.target === "worker") {
+          // Straight to the worker's volume. No size ceiling beyond its disk,
+          // and it marks the source ready itself once ffprobe can read it.
+          await putWithProgress(opened.uploadUrl, file, opened.token, (fraction) =>
+            setTransfer({ progress: fraction }),
+          );
+        } else {
+          // No worker configured — Storage, with its 50 MB per-file limit.
+          setTransfer({ progress: null });
 
-        const supabase = createClient();
-        const { error: putError } = await supabase.storage
-          .from(MEDIA_BUCKET)
-          .uploadToSignedUrl(opened.path, opened.token, file, {
-            contentType: file.type || "video/mp4",
+          const supabase = createClient();
+          const { error: putError } = await supabase.storage
+            .from(MEDIA_BUCKET)
+            .uploadToSignedUrl(opened.path, opened.token, file, {
+              contentType: file.type || "video/mp4",
+            });
+          if (putError) throw new Error(putError.message);
+
+          const doneRes = await fetch("/api/sources/upload", {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ sourceId: opened.sourceId, durationSeconds }),
           });
-        if (putError) throw new Error(putError.message);
-
-        const doneRes = await fetch("/api/sources/upload", {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sourceId: opened.sourceId, durationSeconds }),
-        });
-        const finished = await doneRes.json();
-        if (!doneRes.ok) throw new Error(finished.error ?? "The upload did not land.");
+          const finished = await doneRes.json();
+          if (!doneRes.ok) {
+            throw new Error(finished.error ?? "The upload did not land.");
+          }
+        }
 
         setTransfer({ state: "done", progress: 1 });
       } catch (err) {
@@ -129,7 +189,7 @@ export function AddMedia({
         });
       }
     },
-    [probeDuration],
+    [probeDuration, putWithProgress],
   );
 
   const takeFiles = useCallback(
@@ -281,12 +341,14 @@ export function AddMedia({
                   </span>
                   {transfer.state === "uploading" && (
                     <span className="w-24 shrink-0">
-                      <ProgressBar value={transfer.progress ?? 0.04} max={1} />
+                      <ProgressBar value={transfer.progress ?? 0.02} max={1} />
                     </span>
                   )}
-                  <span className="t-label w-[64px] shrink-0 text-right">
+                  <span className="t-num w-[64px] shrink-0 text-right text-xs text-fg-3">
                     {transfer.state === "uploading"
-                      ? "sending"
+                      ? transfer.progress != null
+                        ? `${Math.round(transfer.progress * 100)}%`
+                        : "sending"
                       : transfer.state === "done"
                         ? "queued"
                         : "failed"}

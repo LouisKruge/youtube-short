@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOwner } from "@/lib/supabase/server";
@@ -81,9 +82,37 @@ export async function POST(request: Request) {
     );
   }
 
-  // Stored as .mp4 regardless of the container it arrived in: every consumer
-  // downstream hands it to ffmpeg, which reads the actual format from the
-  // stream rather than the extension.
+  // Prefer sending the file straight to the worker.
+  //
+  // Supabase Storage caps a single file at 50 MB on the free plan — about 75
+  // seconds of 1080p — and a source is the one file that never needs to be
+  // fetchable by a browser. The worker has a volume sized for video and is the
+  // only thing that reads it, so the bytes go there directly and cross the
+  // network once instead of twice.
+  const workerUrl = process.env.WORKER_URL?.replace(/\/$/, "");
+  const sharedSecret = process.env.WORKER_SHARED_SECRET;
+
+  if (workerUrl && sharedSecret) {
+    // The browser cannot hold the shared secret, so it carries a short-lived
+    // HMAC over this one source id instead.
+    const expiresAt = Date.now() + 10 * 60_000;
+    const signature = createHmac("sha256", sharedSecret)
+      .update(`${created.id}.${expiresAt}`)
+      .digest("hex");
+
+    return NextResponse.json(
+      {
+        sourceId: created.id,
+        target: "worker",
+        uploadUrl: `${workerUrl}/ingest/${created.id}`,
+        token: `${expiresAt}.${signature}`,
+      },
+      { status: 201 },
+    );
+  }
+
+  // No worker configured: fall back to Storage so a local deployment without one
+  // still works for short clips. The 50 MB ceiling applies here.
   const storagePath = `${ownerId}/sources/${created.id}.mp4`;
 
   const { data: signed, error: signError } = await db.storage
@@ -103,6 +132,7 @@ export async function POST(request: Request) {
   return NextResponse.json(
     {
       sourceId: created.id,
+      target: "storage",
       path: storagePath,
       token: signed.token,
       signedUrl: signed.signedUrl,

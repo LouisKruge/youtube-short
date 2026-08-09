@@ -4,6 +4,7 @@ import { timingSafeEqual } from "node:crypto";
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { log } from "./log.js";
+import { applyCors, handleIngest } from "./ingest.js";
 import { drain } from "./pipeline/index.js";
 import { ensureMediaDir } from "./storage.js";
 
@@ -136,6 +137,22 @@ function authorized(header: string | undefined): boolean {
   if (provided.length !== expected.length) return false;
   return timingSafeEqual(provided, expected);
 }
+
+// Ingest is mounted before nothing in particular, but express.json() only
+// parses application/json, so a binary PUT streams through untouched.
+app.options("/ingest/:id", (_req, res) => {
+  applyCors(res);
+  res.sendStatus(204);
+});
+
+app.put("/ingest/:id", (req, res) => {
+  void handleIngest(req, res).catch((err: unknown) => {
+    log.error("Ingest crashed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    if (!res.headersSent) res.status(500).json({ error: "Ingest failed." });
+  });
+});
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, draining, service: "nexus-clips-worker" });
