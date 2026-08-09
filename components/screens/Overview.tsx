@@ -198,8 +198,9 @@ export function Overview({
 
             {opportunities.length === 0 ? (
               <p className="py-4 text-sm text-fg-3">
-                No scored clips waiting. Scoring runs once a source has a
-                transcript.
+                No scored clips waiting. Clips are ranked on craft only when the
+                worker has an Anthropic key; without one they are still cut and
+                cropped, but ordered by audio energy.
               </p>
             ) : (
               <ol>

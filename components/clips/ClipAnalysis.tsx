@@ -53,8 +53,9 @@ export function ClipAnalysis({
       <div className={cn("px-3 py-6", className)}>
         <p className="t-label">not scored</p>
         <p className="mt-2 text-xs leading-relaxed text-fg-3">
-          Scoring runs once the source has a transcript. Until then this clip was
-          picked on audio energy alone.
+          Craft ranking needs an Anthropic key on the worker. This clip was
+          picked on audio energy — loudness, scene changes and speech density.
+          That is a proxy for where attention might be, not a measure of it.
         </p>
       </div>
     );
