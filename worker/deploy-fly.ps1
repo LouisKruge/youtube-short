@@ -1,5 +1,10 @@
-# One-shot Fly deploy for the Nexus Clips worker — Windows PowerShell.
+﻿# One-shot Fly deploy for the Nexus Clips worker - Windows PowerShell.
 #
+# IMPORTANT, and the reason this file is plain ASCII with a byte-order mark:
+# Windows PowerShell 5.1 reads a .ps1 as ANSI unless it starts with a UTF-8 BOM.
+# An em dash saved as UTF-8 then arrives as three Windows-1252 characters, one
+# of which is a quote, which terminates a string early and makes the whole file
+# fail to parse with errors that point at innocent lines. Keep this file ASCII.
 #   cd youtube-short\worker
 #   .\deploy-fly.ps1
 #
@@ -9,7 +14,7 @@
 #
 # It reads the app name, region and volume out of fly.toml so there is nothing
 # to keep in sync by hand, stops at the first failure rather than leaving a
-# half-built app, and skips anything that already exists — so it is safe to run
+# half-built app, and skips anything that already exists - so it is safe to run
 # again after fixing something.
 
 $ErrorActionPreference = "Stop"
@@ -132,13 +137,13 @@ if ($volumes -match [regex]::Escape($volume)) {
 
 Write-Step "Setting secrets"
 
-Write-Host "   Paste each value and press Enter. Hidden entries show nothing as you type —"
+Write-Host "   Paste each value and press Enter. Hidden entries show nothing as you type  - "
 Write-Host "   that is normal, keep going."
 Write-Host ""
 
 $serviceKey = Read-Hidden "   SUPABASE_SERVICE_ROLE_KEY (Supabase, Settings, API, the service_role key)"
 if ([string]::IsNullOrWhiteSpace($serviceKey)) {
-  Stop-With "The service_role key is required — without it the worker cannot claim any jobs."
+  Stop-With "The service_role key is required - without it the worker cannot claim any jobs."
 }
 
 $openaiKey = Read-Hidden "   OPENAI_API_KEY (Whisper transcription)"
@@ -159,7 +164,7 @@ $sharedSecret = Read-Host "   WORKER_SHARED_SECRET (must match Vercel)"
 if ([string]::IsNullOrWhiteSpace($sharedSecret)) { Stop-With "WORKER_SHARED_SECRET is required." }
 
 # Only send keys that were given. An empty secret is not the same as an absent
-# one — the worker checks for a non-empty value to decide what is available.
+# one - the worker checks for a non-empty value to decide what is available.
 $secretArgs = @(
   "WORKER_SHARED_SECRET=$sharedSecret",
   "SUPABASE_URL=$supabaseUrl",
@@ -173,18 +178,18 @@ if ($LASTEXITCODE -ne 0) { Stop-With "Could not set the secrets." }
 Write-Ok "secrets staged"
 
 if ([string]::IsNullOrWhiteSpace($anthropicKey)) {
-  Write-Ok "no Anthropic key — audio-only ranking, transcript-derived hooks"
+  Write-Ok "no Anthropic key - audio-only ranking, transcript-derived hooks"
 }
 
 # --- Deploy ------------------------------------------------------------------
 
-Write-Step "Building and deploying (several minutes — the build runs on Fly, not here)"
+Write-Step "Building and deploying (several minutes - the build runs on Fly, not here)"
 
 fly deploy --app $app
 if ($LASTEXITCODE -ne 0) {
   Stop-With @"
 The deploy failed. The build log above says why.
-Copy the last 30 lines or so — that is what is needed to diagnose it.
+Copy the last 30 lines or so - that is what is needed to diagnose it.
 "@
 }
 
@@ -221,7 +226,7 @@ Write-Host "   The worker is up." -ForegroundColor Green
 Write-Host ""
 Write-Host "=============================================================="
 Write-Host "  Add these in Vercel, Settings, Environment Variables,"
-Write-Host "  then REDEPLOY — new variables never reach a running deploy."
+Write-Host "  then REDEPLOY - new variables never reach a running deploy."
 Write-Host ""
 Write-Host "    WORKER_URL=$url"
 Write-Host "    WORKER_SHARED_SECRET=$sharedSecret"

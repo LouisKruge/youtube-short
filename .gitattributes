@@ -1,0 +1,12 @@
+# PowerShell scripts must reach Windows with CRLF endings. Left to itself git
+# would check them out with whatever the platform default is, and a .ps1 with
+# LF endings is a second way to get parse errors that point at the wrong lines.
+#
+# The files themselves are deliberately plain ASCII with a UTF-8 BOM: Windows
+# PowerShell 5.1 reads a .ps1 as ANSI without one, so a single em dash is enough
+# to break the parse. Keep them ASCII.
+*.ps1 text eol=crlf
+
+# Shell scripts must keep LF, including when checked out on Windows — CRLF in a
+# shebang line makes the interpreter unfindable.
+*.sh text eol=lf
