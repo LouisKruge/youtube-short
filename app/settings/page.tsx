@@ -92,10 +92,19 @@ export default async function SettingsPage() {
     {
       name: "Worker service",
       tone: worker ? "done" : "attention",
-      state: worker ? "reachable" : "unreachable",
+      // Three different failures, three different fixes. "Unreachable" when the
+      // variable is simply absent sends the operator looking for a container
+      // that was never started.
+      state: worker
+        ? "reachable"
+        : process.env.WORKER_URL
+          ? "unreachable"
+          : "not configured",
       detail: worker
         ? "ffmpeg, yt-dlp and Whisper run here"
-        : "Nothing will download, cut or render until this is up",
+        : process.env.WORKER_URL
+          ? "Configured but not answering. Check the container is running and that WORKER_SHARED_SECRET matches on both sides."
+          : "WORKER_URL is not set. Nothing will download, cut, caption or upload — none of that runs on Vercel. Deploy worker/ to a container host and set WORKER_URL and WORKER_SHARED_SECRET here.",
     },
   ];
 

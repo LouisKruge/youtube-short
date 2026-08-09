@@ -8,6 +8,7 @@ import type { QuotaSnapshot } from "@/lib/types";
 import { CommandPalette } from "./CommandPalette";
 import { Sidebar } from "./Sidebar";
 import { TopBar, type Crumb } from "./TopBar";
+import { WorkerBanner } from "./WorkerBanner";
 import { ALL_NAV } from "./nav";
 
 const COLLAPSE_KEY = "nexus.sidebar.collapsed";
@@ -117,10 +118,25 @@ export function AppShell({
 
   return (
     <ToastProvider>
-      <div className="flex min-h-screen w-full">
+      {/* Bleed screens own the viewport and clip; ordinary screens scroll the
+          page. Pinning the height here rather than inside `main` means anything
+          that appears between the top bar and the content — the worker banner —
+          takes its space out of the workspace instead of pushing it under the
+          fold. */}
+      <div
+        className={cn(
+          "flex w-full",
+          bleed ? "h-screen overflow-hidden" : "min-h-screen",
+        )}
+      >
         <Sidebar collapsed={collapsed} onToggle={toggleCollapsed} />
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div
+          className={cn(
+            "flex min-w-0 flex-1 flex-col",
+            bleed ? "min-h-0" : "min-h-screen",
+          )}
+        >
           <TopBar
             crumbs={crumbs}
             processing={processing}
@@ -130,11 +146,15 @@ export function AppShell({
             onOpenPalette={() => setPalette(true)}
           />
 
+          {/* Above the content and outside the bleed container, so it appears
+              on the workspace too rather than only on the scrolling screens. */}
+          <WorkerBanner pending={processing} />
+
           <main
             className={cn(
               "min-w-0 flex-1",
               bleed
-                ? "flex h-[calc(100vh-var(--topbar))] flex-col overflow-hidden"
+                ? "flex min-h-0 flex-1 flex-col overflow-hidden"
                 : "mx-auto w-full px-6 py-6",
               !bleed && (width === "wide" ? "max-w-work" : "max-w-[1240px]"),
             )}
