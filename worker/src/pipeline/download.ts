@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { config } from "../config.js";
 import { ffprobe, ytdlp } from "../exec.js";
 import { log } from "../log.js";
-import { cleanup, scratchDir, uploadFile } from "../storage.js";
+import { cleanup, keepLocally, scratchDir } from "../storage.js";
 import { updateSource, type SourceJob } from "../db.js";
 
 interface Probe {
@@ -138,8 +138,12 @@ export async function downloadSource(job: SourceJob): Promise<void> {
     const localPath = join(dir, "source.mp4");
     const { durationSeconds } = await probe(localPath);
 
-    const storagePath = `${job.owner_id}/sources/${job.id}.mp4`;
-    await uploadFile(localPath, storagePath, "video/mp4");
+    // Kept on the worker's volume rather than pushed to Supabase Storage. A
+    // two-hour 1080p source is roughly 4 GB; the free tier caps a single file at
+    // 50 MB and the whole plan at 1 GB, so this round trip was the difference
+    // between the product working and not. Nothing but this worker ever reads
+    // the source — only the finished clips need to be fetchable by a browser.
+    const storagePath = await keepLocally(localPath, `sources/${job.id}.mp4`);
 
     await updateSource(job.id, {
       status: "downloaded",

@@ -167,6 +167,26 @@ cover frames and upload all work exactly the same.
 Add the key later and it takes effect on the next source — already-cut clips
 keep the metadata they were given.
 
+## Where the media lives
+
+Source videos stay on the worker's volume. Finished clips go to Supabase
+Storage.
+
+That split is not an optimisation, it is what makes the thing run at all on a
+free Supabase plan. A two-hour 1080p source is about 4 GB — measured, roughly
+39 MB per minute. Supabase Free caps a single file at 50 MB and the whole
+project at 1 GB, so routing the source through Storage put it 86x over the
+per-file limit. Paying to warehouse it would also be paying twice: the worker
+already has a volume, and nothing except the worker ever reads a source.
+
+Clips are the opposite case — a few megabytes each, and the browser has to fetch
+them to show a preview — so those do go to Storage.
+
+A source is therefore tied to the machine that fetched it. If the volume is
+lost, the source has to be re-added; the pipeline says so plainly rather than
+failing with a storage error. That is the right trade for a file that is pure
+input.
+
 ## Sizing
 
 - **Disk:** needs room for the largest source video plus a working copy.
@@ -317,6 +337,26 @@ cover frames and upload all work exactly the same.
 
 Add the key later and it takes effect on the next source — already-cut clips
 keep the metadata they were given.
+
+## Where the media lives
+
+Source videos stay on the worker's volume. Finished clips go to Supabase
+Storage.
+
+That split is not an optimisation, it is what makes the thing run at all on a
+free Supabase plan. A two-hour 1080p source is about 4 GB — measured, roughly
+39 MB per minute. Supabase Free caps a single file at 50 MB and the whole
+project at 1 GB, so routing the source through Storage put it 86x over the
+per-file limit. Paying to warehouse it would also be paying twice: the worker
+already has a volume, and nothing except the worker ever reads a source.
+
+Clips are the opposite case — a few megabytes each, and the browser has to fetch
+them to show a preview — so those do go to Storage.
+
+A source is therefore tied to the machine that fetched it. If the volume is
+lost, the source has to be re-added; the pipeline says so plainly rather than
+failing with a storage error. That is the right trade for a file that is pure
+input.
 
 ## Sizing
 

@@ -221,13 +221,13 @@ export async function analyzeSource(job: SourceJob): Promise<void> {
 
   try {
     const localPath = join(dir, "source.mp4");
-    await downloadFile(job.storage_path, localPath);
+    const sourcePath = await downloadFile(job.storage_path, localPath);
 
     const settings = await getSettings(job.owner_id);
 
     const [envelope, silences] = await Promise.all([
-      loudnessEnvelope(localPath),
-      detectSilences(localPath),
+      loudnessEnvelope(sourcePath),
+      detectSilences(sourcePath),
     ]);
 
     const duration =
@@ -240,7 +240,7 @@ export async function analyzeSource(job: SourceJob): Promise<void> {
       loudness_envelope: downsample(envelope),
     });
 
-    const scenes: Scene[] = await detectScenes(localPath, duration);
+    const scenes: Scene[] = await detectScenes(sourcePath, duration);
 
     if (scenes.length > 0) {
       await db.from("scenes").delete().eq("source_video_id", job.id);
@@ -277,7 +277,7 @@ export async function analyzeSource(job: SourceJob): Promise<void> {
 
     let transcript: Transcript = { text: "", words: [] };
     if (config.transcriptionEnabled) {
-      transcript = await transcribeSource(localPath, dir, duration, (fraction) => {
+      transcript = await transcribeSource(sourcePath, dir, duration, (fraction) => {
         log.info("Transcription progress", {
           sourceId: job.id,
           percent: Math.round(fraction * 100),

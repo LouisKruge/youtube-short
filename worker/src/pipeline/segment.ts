@@ -37,7 +37,7 @@ export async function segmentClip(job: ClipJob): Promise<void> {
     const settings = await getSettings(job.owner_id);
 
     const localSource = join(dir, "source.mp4");
-    await downloadFile(sourcePath, localSource);
+    const inputPath = await downloadFile(sourcePath, localSource);
 
     let start = Number(job.start_seconds);
     const end = Number(job.end_seconds);
@@ -66,7 +66,7 @@ export async function segmentClip(job: ClipJob): Promise<void> {
         "-ss",
         String(start),
         "-i",
-        localSource,
+        inputPath,
         "-t",
         String(duration),
         "-c:v",
