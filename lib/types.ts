@@ -97,9 +97,18 @@ export interface SourceVideo {
     clips_selected?: number;
     scenes?: number;
     transcribed?: boolean;
+    transcription_enabled?: boolean;
     scored_by_model?: boolean;
   } | null;
   error_message: string | null;
+  /**
+   * The most recent failure, kept across retries.
+   *
+   * Distinct from error_message, which is only written when a job has run out
+   * of attempts — the worker has to clear that one to hand a job back to the
+   * queue, so it never shows a failure that is about to be retried.
+   */
+  last_error: string | null;
   attempts: number;
   created_at: string;
   updated_at: string;

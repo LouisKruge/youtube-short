@@ -15,7 +15,7 @@ import { ProcessingStages } from "@/components/clips/ProcessingStages";
 import { hms, Waveform } from "@/components/clips/Waveform";
 import { band } from "@/components/clips/MomentMarkers";
 import { relativeTime } from "@/lib/format";
-import { sourceStages, statusLabel, statusTone } from "@/lib/stages";
+import { retryNotice, sourceStages, statusLabel, statusTone } from "@/lib/stages";
 import type { Overview as OverviewData } from "@/lib/queries";
 
 /**
@@ -165,7 +165,7 @@ export function Overview({
 
           <div className="mt-5">
             <h4 className="t-label mb-1">Pipeline</h4>
-            <ProcessingStages stages={stages} />
+            <ProcessingStages stages={stages} note={retryNotice(active)} />
           </div>
 
           {active.error_message && (

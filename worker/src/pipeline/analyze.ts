@@ -363,10 +363,16 @@ export async function analyzeSource(job: SourceJob): Promise<void> {
         scenes: scenes.length,
         silences: silences.length,
         transcribed: transcript.words.length > 0,
+        // Distinguishes "turned off" from "produced no words". Without it the
+        // readout leaves Transcription running forever when the stage was never
+        // going to run, and holds Moment scoring at waiting behind it.
+        transcription_enabled: config.transcriptionEnabled,
         scored_by_model: scored.some((s) => s.category !== "unrated"),
       },
       claimed_at: null,
       error_message: null,
+      // A run that reached the end clears the record of the ones that did not.
+      last_error: null,
       attempts: 0,
     });
 

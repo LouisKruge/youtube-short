@@ -48,14 +48,19 @@ const STATE_SHORT: Record<StageState, string> = {
 export function ProcessingStages({
   stages,
   compact,
+  note,
   className,
 }: {
   stages: Stage[];
   compact?: boolean;
+  /** A failure that is being retried. Shown under the list, not on a row —
+      the stage that threw is not always the one still marked running. */
+  note?: string | null;
   className?: string;
 }) {
   return (
-    <ol className={cn(compact ? "space-y-0" : "space-y-0", className)}>
+    <div className={className}>
+      <ol className="space-y-0">
       {stages.map((stage) => (
         <li
           key={stage.label}
@@ -120,6 +125,16 @@ export function ProcessingStages({
           </span>
         </li>
       ))}
-    </ol>
+      </ol>
+
+      {note && (
+        <p className="mt-2.5 flex gap-2 text-xs leading-relaxed text-fg-3">
+          <span className="mt-[3px] shrink-0">
+            <StatusDot tone="attention" />
+          </span>
+          <span className="min-w-0">{note}</span>
+        </p>
+      )}
+    </div>
   );
 }

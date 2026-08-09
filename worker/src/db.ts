@@ -116,6 +116,18 @@ export async function updateClip(id: string, patch: Record<string, unknown>) {
   if (error) throw new Error(`Could not update clip ${id}: ${error.message}`);
 }
 
+/**
+ * `error_message` cannot hold a retryable failure: claimSource requires it to
+ * be null, so a row carrying one is never picked up again. That is right for a
+ * job that has given up and wrong for one that is about to try again — and it
+ * meant the first two failures of a three-attempt job were recorded nowhere the
+ * operator could see. A source could fail twice while the dashboard showed a
+ * progress bar.
+ *
+ * `last_error` carries the reason across retries without gating the claim. The
+ * two columns now mean different things: error_message is "parked, look at
+ * this", last_error is "here is what went wrong most recently".
+ */
 export async function failSource(job: SourceJob, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   const exhausted = job.attempts >= config.maxAttempts;
@@ -125,6 +137,7 @@ export async function failSource(job: SourceJob, err: unknown) {
     // incremented. Exhausted: park it so a human looks at it.
     status: exhausted ? "failed" : job.status,
     error_message: exhausted ? message : null,
+    last_error: `Attempt ${job.attempts} of ${config.maxAttempts}: ${message}`,
     claimed_at: null,
   });
 }
@@ -136,6 +149,7 @@ export async function failClip(job: ClipJob, err: unknown) {
   await updateClip(job.id, {
     status: exhausted ? "failed" : job.status,
     error_message: exhausted ? message : null,
+    last_error: `Attempt ${job.attempts} of ${config.maxAttempts}: ${message}`,
     claimed_at: null,
   });
 }

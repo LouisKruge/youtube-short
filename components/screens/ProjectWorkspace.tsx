@@ -12,7 +12,7 @@ import { MomentMarkers, band, type Moment } from "@/components/clips/MomentMarke
 import { ProcessingStages } from "@/components/clips/ProcessingStages";
 import { VideoPlayer, tc, type PlayerHandle } from "@/components/clips/VideoPlayer";
 import { hms, TimeScale, Waveform } from "@/components/clips/Waveform";
-import { sourceStages, statusLabel, statusTone } from "@/lib/stages";
+import { retryNotice, sourceStages, statusLabel, statusTone } from "@/lib/stages";
 import type { ProjectDetail } from "@/lib/queries";
 import type { CaptionStyle, ClipWithContext } from "@/lib/types";
 
@@ -244,7 +244,7 @@ export function ProjectWorkspace({
 
           {panel === "pipeline" ? (
             <div className="overflow-y-auto p-3">
-              <ProcessingStages stages={stages} />
+              <ProcessingStages stages={stages} note={retryNotice(source)} />
               {source.error_message && (
                 <p
                   role="alert"

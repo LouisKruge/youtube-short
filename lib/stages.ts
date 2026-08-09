@@ -43,6 +43,18 @@ export function sourceStages(
   const transcribed = source.analysis?.transcribed === true;
   const scored = source.analysis?.clips_selected != null;
 
+  /**
+   * Transcription can be switched off at the worker, and a stage that is never
+   * going to run must not sit at "running" forever — nor hold the stage after
+   * it at "waiting" behind a predecessor that will never complete.
+   *
+   * Only trust the flag once the worker has written an analysis blob. Before
+   * that there is nothing to read, and assuming either way would be a guess.
+   */
+  const transcriptionOff =
+    source.analysis != null && source.analysis.transcription_enabled === false;
+  const transcriptionSettled = transcribed || transcriptionOff;
+
   /** A stage runs when its predecessor is done and it has not produced output. */
   const step = (
     done: boolean,
@@ -78,12 +90,16 @@ export function sourceStages(
     },
     {
       label: "Transcription",
-      state: step(transcribed, scenes),
-      detail: transcribed ? "word-level" : undefined,
+      state: transcriptionOff ? "skipped" : step(transcribed, scenes),
+      detail: transcriptionOff
+        ? "off"
+        : transcribed
+          ? "word-level"
+          : undefined,
     },
     {
       label: "Moment scoring",
-      state: step(scored, transcribed),
+      state: step(scored, transcriptionSettled),
       detail: scored
         ? `${source.analysis?.candidates_considered ?? 0} candidates`
         : undefined,
@@ -102,6 +118,25 @@ export function sourceStages(
   }
 
   return stages;
+}
+
+/**
+ * The line shown under the stage list when an attempt has failed but the job is
+ * still going.
+ *
+ * A retried failure clears `error_message` — the worker has to, or the row
+ * could never be claimed again — so without this the operator sees a progress
+ * bar while the same failure repeats underneath it. Returns null once the job
+ * has either succeeded (the worker clears last_error) or given up, because a
+ * parked job shows `error_message` in its own right and saying it twice reads
+ * as two separate faults.
+ */
+export function retryNotice(
+  source: Pick<SourceVideo, "status" | "last_error">,
+): string | null {
+  if (!source.last_error) return null;
+  if (source.status === "failed") return null;
+  return source.last_error;
 }
 
 /**

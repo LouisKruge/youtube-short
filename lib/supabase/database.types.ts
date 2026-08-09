@@ -36,6 +36,7 @@ type SourceVideoRow = {
   scene_count: number | null;
   radar: Json;
   error_message: string | null;
+  last_error: string | null;
   claimed_at: string | null;
   attempts: number;
   created_at: string;
@@ -76,6 +77,7 @@ type ClipRow = {
   description: string | null;
   hashtags: string[] | null;
   error_message: string | null;
+  last_error: string | null;
   claimed_at: string | null;
   attempts: number;
   created_at: string;
