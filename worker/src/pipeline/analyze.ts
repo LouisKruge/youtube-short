@@ -317,6 +317,24 @@ export async function analyzeSource(job: SourceJob): Promise<void> {
     const rankById = new Map(selected.map((s, i) => [s.id, i + 1]));
     selected.sort((a, b) => a.start - b.start);
 
+    // Re-analysing a source must replace its clips, not add a second set
+    // alongside them. Analysis is normally once per source, but it happens
+    // again whenever a stage is fixed and the source is re-queued — and an
+    // insert-only path silently doubles the clip list every time.
+    //
+    // Only untouched clips go. Anything the operator has acted on — approved,
+    // queued, published, rejected — is theirs, and a re-run of the automatic
+    // part has no business deleting it.
+    const { error: clearError } = await db
+      .from("clips")
+      .delete()
+      .eq("source_video_id", job.id)
+      .eq("library_status", "unreviewed");
+
+    if (clearError) {
+      throw new Error(`Could not clear previous clips: ${clearError.message}`);
+    }
+
     if (selected.length > 0) {
       await db.from("clips").insert(
         selected.map((s) => ({
