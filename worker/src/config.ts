@@ -24,6 +24,17 @@ export const config = {
 
   mediaDir: process.env.MEDIA_DIR ?? "/tmp/nexus-media",
 
+  /**
+   * Contents of a Netscape-format cookies.txt, if one has been supplied.
+   *
+   * YouTube challenges requests from datacenter IP ranges — which is every
+   * cloud host — with "Sign in to confirm you're not a bot". Cookies from a
+   * signed-in browser are yt-dlp's documented answer. Held as the file's text
+   * rather than a path so it can live in the platform's secret store instead of
+   * on a volume.
+   */
+  ytdlpCookies: process.env.YTDLP_COOKIES ?? "",
+
   /** How often the worker polls for work on its own, independent of nudges. */
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 60_000),
 

@@ -241,6 +241,38 @@ The dashboard's own reading distinguishes the failures for you:
 - **answered 404 / not the Nexus worker** — something else is at that address.
 - **did not answer within 10s** — likely a cold start; check again shortly.
 
+## YouTube and the bot check
+
+`Sign in to confirm you're not a bot` is the most likely first failure on any
+hosted worker. It is not about the video or about a stale yt-dlp — it is the IP.
+Every cloud provider is on datacenter ranges and YouTube challenges those; the
+same URL usually downloads fine from a home connection.
+
+Three ways past it, cheapest first:
+
+1. **Upload the file instead of the link.** Ingest takes a local file straight
+   into Storage, and yt-dlp is never involved. Nothing to configure and nothing
+   to maintain.
+
+2. **Run the worker on your own machine** (see above). A residential IP is not
+   challenged in the same way.
+
+3. **Supply cookies.** Export a `cookies.txt` from a signed-in browser and put
+   its whole contents in the `YTDLP_COOKIES` secret:
+
+   ```bash
+   fly secrets set YTDLP_COOKIES="$(cat cookies.txt)" --app <your-app>
+   ```
+
+   The worker writes it into the per-job scratch directory, hands it to yt-dlp,
+   and deletes it with the rest of the job.
+
+   Be aware of what this costs: those cookies are a live session for whatever
+   Google account exported them, they expire and need replacing, and Google may
+   treat a datacenter IP using them as suspicious — with the account, not just
+   the download, as what gets restricted. A throwaway account is the sane
+   choice if you go this way at all.
+
 ## Keeping downloads working
 
 `yt-dlp` tracks YouTube's player, which changes often enough that yt-dlp ships a

@@ -1,4 +1,6 @@
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { config } from "../config.js";
 import { ffprobe, ytdlp } from "../exec.js";
 import { log } from "../log.js";
 import { cleanup, scratchDir, uploadFile } from "../storage.js";
@@ -33,17 +35,70 @@ async function probe(path: string): Promise<Probe> {
  * Supabase Storage. Nexus does not judge what the URL points at; rights and
  * platform terms are the operator's call.
  */
+/**
+ * Turns yt-dlp's wall of text into something the operator can act on.
+ *
+ * The raw messages are written for someone reading a terminal with the wiki
+ * open. In a dashboard they are three lines of URLs and no instruction.
+ */
+function explainDownloadFailure(raw: string): string | null {
+  if (/Sign in to confirm you.?re not a bot|confirm your age|cookies/i.test(raw)) {
+    return (
+      "YouTube refused the download as automated traffic. This is about where " +
+      "the worker runs, not the video: every cloud host is on a datacenter IP " +
+      "range, and YouTube challenges those. Three ways forward — upload the " +
+      "file directly instead of pasting a link, run the worker on your own " +
+      "machine where the connection is residential, or set the YTDLP_COOKIES " +
+      "secret to the contents of a cookies.txt exported from a signed-in " +
+      "browser."
+    );
+  }
+  if (/Failed to extract any player response|Unable to extract/i.test(raw)) {
+    return (
+      "yt-dlp could not read the page, which usually means the copy on the " +
+      "worker has aged out — YouTube changes its player often. Redeploy to " +
+      "pick up the current release."
+    );
+  }
+  if (/Video unavailable|Private video|members-only|removed by the uploader/i.test(raw)) {
+    return "The video is not publicly available at that URL.";
+  }
+  if (/geo|not available in your country/i.test(raw)) {
+    return "The video is blocked in the region the worker runs in.";
+  }
+  return null;
+}
+
 export async function downloadSource(job: SourceJob): Promise<void> {
   await updateSource(job.id, { status: "downloading" });
   const dir = await scratchDir("src");
 
   try {
+    // The cookie jar is written before anything calls yt-dlp, because the title
+    // probe below runs first and hits the same bot check the download does.
+    // It lives in the per-job scratch directory, which `finally` removes — the
+    // jar never outlives the job that used it.
+    const cookieArgs: string[] = [];
+    if (config.ytdlpCookies.trim().length > 0) {
+      const cookiePath = join(dir, "cookies.txt");
+      await writeFile(cookiePath, config.ytdlpCookies, { mode: 0o600 });
+      cookieArgs.push("--cookies", cookiePath);
+      log.info("Using supplied YouTube cookies", { sourceId: job.id });
+    }
+
     // Read the title first — one cheap metadata call, and it gives the
     // operator something recognizable in the queue while the download runs.
     let title: string | null = null;
     try {
       const { stdout } = await ytdlp(
-        ["--no-warnings", "--skip-download", "--print", "%(title)s", job.source_url],
+        [
+          "--no-warnings",
+          ...cookieArgs,
+          "--skip-download",
+          "--print",
+          "%(title)s",
+          job.source_url,
+        ],
         60_000,
       );
       title = stdout.trim().split("\n")[0] || null;
@@ -60,6 +115,7 @@ export async function downloadSource(job: SourceJob): Promise<void> {
       [
         "--no-warnings",
         "--no-playlist",
+        ...cookieArgs,
         // Cap at 1080p — the output is 1080x1920, so a 4K source is pure
         // download time and disk for no gain.
         "-f",
@@ -71,7 +127,13 @@ export async function downloadSource(job: SourceJob): Promise<void> {
         job.source_url,
       ],
       45 * 60_000,
-    );
+    ).catch((err: unknown) => {
+      const raw = err instanceof Error ? err.message : String(err);
+      const explained = explainDownloadFailure(raw);
+      // Keep the original underneath — the explanation is a summary, not a
+      // replacement, and the raw text is what a bug report needs.
+      throw new Error(explained ? `${explained}\n\n${raw}` : raw);
+    });
 
     const localPath = join(dir, "source.mp4");
     const { durationSeconds } = await probe(localPath);
