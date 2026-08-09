@@ -11,7 +11,10 @@
 # WORKER_SHARED_SECRET in the Vercel project, and redeploy it.
 
 app = "nexus-clips-worker"
-primary_region = "cdg"
+# Dublin, to sit in the same region as the Supabase project (eu-west-1). This
+# worker pushes and pulls multi-gigabyte media to Storage on every job, so
+# co-locating is worth more here than it would be for a normal API service.
+primary_region = "dub"
 
 [build]
   dockerfile = "Dockerfile"
@@ -38,9 +41,16 @@ primary_region = "cdg"
     path = "/health"
 
 # A two-hour source is downloaded whole, decoded for the envelope, then encoded
-# twice per clip. 1 GB of RAM is not enough for 1080p x264; 2 GB is the floor.
+# twice per clip. 1 GB is not enough for 1080x1920 x264; 4 GB leaves headroom
+# for a long source and the scratch files beside it.
+#
+# Starting on shared CPU because the load is bursty — a few sources a day, not a
+# continuous stream — and shared instances burst well for that shape. If encodes
+# feel slow, or you start batching, move to `performance-1x`: ffmpeg will run at
+# 100% for minutes at a time and shared CPU is throttled to its baseline share
+# once the burst credit is gone. That is the one dial worth turning here.
 [[vm]]
-  size = "performance-1x"
+  size = "shared-cpu-2x"
   memory = "4gb"
 
 # Video is written to disk before it goes to Storage. Fly's rootfs is small and
