@@ -41,7 +41,12 @@ export function CropTrackChart({
   height?: number;
   className?: string;
 }) {
-  if (!track || track.method !== "motion" || track.segments.length === 0) {
+  // "face" and "motion" both produce a real track to draw. Testing for one
+  // named method meant the face track — the better of the two — rendered as
+  // "no tracking".
+  const tracked = track?.method === "motion" || track?.method === "face";
+
+  if (!track || !tracked || track.segments.length === 0) {
     return (
       <div
         className={cn("well flex items-center justify-between px-2", className)}
@@ -107,6 +112,13 @@ export function CropTrackChart({
 
       <span className="t-label absolute left-2 top-1 text-fg-4">L</span>
       <span className="t-label absolute bottom-1 left-2 text-fg-4">R</span>
+
+      {/* Which signal drove the crop. Worth stating: following faces and
+          following movement produce very different framing, and when a clip is
+          badly framed this is the first thing you want to know. */}
+      <span className="t-label absolute bottom-1 right-2 text-fg-4">
+        {track.method}
+      </span>
 
       {playhead != null && durationSeconds > 0 && (
         <span
