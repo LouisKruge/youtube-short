@@ -83,12 +83,32 @@ primary_region = "lhr"
 # costs the same RAM as a five-minute one; only the frame size matters. Length
 # drives *disk*, which is what the volume below is for.
 #
-# Shared CPU because the load is bursty — a few sources a day, not a continuous
-# stream. If encodes feel slow, `fly scale vm performance-1x` is the dial:
-# ffmpeg runs at 100% for minutes and shared CPU throttles to its baseline once
-# the burst credit is gone.
+# A dedicated core, because shared was measurably not enough.
+#
+# Scene detection decodes the source end to end, and decoding is essentially
+# the whole cost of that stage — measured on 1080p30, decode alone is 49.9s of
+# a 52.1s pass, so no filter change moves it. On shared-cpu-1x a 1h49m source
+# failed to finish that pass in 30 minutes, i.e. under 3.6x realtime. The same
+# work runs at ~6x realtime on one unthrottled core.
+#
+# Shared vCPUs burst and then throttle to a baseline. That is the wrong shape
+# for ffmpeg, which sits at 100% for minutes at a stretch and spends most of a
+# job past the point where the credit is gone.
+#
+# This costs real money and a dedicated core is several times the price of a
+# shared one for the same RAM — check fly.io/docs/about/pricing for the current
+# figure. The load here is bursty (a few sources a day, not a continuous
+# stream), so scaling back down between batches is legitimate:
+#
+#   fly scale vm shared-cpu-1x --app nexus-clips-worker-30af5d
+#
+# Whatever is set here wins on the next deploy, so change this line rather than
+# relying on `fly scale` alone - otherwise the next deploy quietly reverts it.
+#
+# Memory stays at 2 GB: measured peak resident is 442 MB (the vertical crop),
+# and it does not grow with source length because ffmpeg streams.
 [[vm]]
-  size = "shared-cpu-1x"
+  size = "performance-1x"
   memory = "2gb"
 
 # Video is written to disk before it goes to Storage. Fly's rootfs is small and
