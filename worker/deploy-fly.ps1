@@ -17,7 +17,16 @@
 # half-built app, and skips anything that already exists - so it is safe to run
 # again after fixing something.
 
-$ErrorActionPreference = "Stop"
+# Deliberately NOT 'Stop'.
+#
+# flyctl writes progress and warnings to stderr as a matter of course - a
+# telemetry warning, a deprecation notice, the build log. With
+# $ErrorActionPreference = 'Stop', PowerShell turns every one of those lines
+# into a terminating error, so the script dies on output that means nothing.
+#
+# Exit codes are the only trustworthy signal from a native tool, and every fly
+# call below checks $LASTEXITCODE explicitly.
+$ErrorActionPreference = "Continue"
 
 function Write-Step($text) {
   Write-Host ""
@@ -82,7 +91,7 @@ Open the worker folder first, for example:
 "@
 }
 
-fly auth whoami | Out-Null
+fly auth whoami 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) { Stop-With "Not signed in to Fly. Run:  fly auth login" }
 Write-Ok "signed in"
 
@@ -106,7 +115,7 @@ Write-Host "   URL:    $url"
 
 Write-Step "Creating the app (skipped if it already exists)"
 
-fly status --app $app 2>&1 | Out-Null
+fly status --app $app 2>$null | Out-Null
 if ($LASTEXITCODE -eq 0) {
   Write-Ok "already exists"
 } else {
@@ -124,7 +133,7 @@ if ($LASTEXITCODE -eq 0) {
 Write-Step "Creating the volume (skipped if it already exists)"
 
 # fly.toml declares [mounts]; a deploy fails outright if that volume is absent.
-$volumes = fly volumes list --app $app 2>&1 | Out-String
+$volumes = fly volumes list --app $app 2>$null | Out-String
 if ($volumes -match [regex]::Escape($volume)) {
   Write-Ok "already exists"
 } else {
@@ -137,8 +146,8 @@ if ($volumes -match [regex]::Escape($volume)) {
 
 Write-Step "Setting secrets"
 
-Write-Host "   Paste each value and press Enter. Hidden entries show nothing as you type  - "
-Write-Host "   that is normal, keep going."
+Write-Host "   Paste each value and press Enter. Hidden entries show nothing as you type,"
+Write-Host "   which is normal - paste and press Enter."
 Write-Host ""
 
 $serviceKey = Read-Hidden "   SUPABASE_SERVICE_ROLE_KEY (Supabase, Settings, API, the service_role key)"
@@ -202,7 +211,7 @@ Write-Host "   Waiting for the machine to answer..."
 $healthy = $false
 for ($i = 1; $i -le 20; $i++) {
   try {
-    $body = (Invoke-WebRequest -Uri "$url/health" -UseBasicParsing -TimeoutSec 10).Content
+    $body = (Invoke-WebRequest -Uri "$url/health" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop).Content
     if ($body -match "nexus-clips-worker") { $healthy = $true; break }
   } catch {
     # Still booting. Fly machines take a few seconds to accept connections.
