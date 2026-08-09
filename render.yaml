@@ -1,0 +1,78 @@
+# Render blueprint for the Nexus Clips worker.
+#
+# This file must live at the repository root — Render only looks here, which is
+# why it is not tucked inside worker/ alongside the code it deploys.
+#
+# In the Render dashboard: New → Blueprint → pick this repository → Apply.
+# Render reads this file, builds the Dockerfile itself, and prompts in the web
+# UI for each value marked `sync: false`. No terminal, no local checkout.
+#
+# The worker's address will be:
+#
+#   https://nexus-clips-worker-30af5d.onrender.com
+#
+# The suffix is deliberate. onrender.com subdomains are global, so a plain
+# "nexus-clips-worker" would likely be taken and Render would silently hand you
+# a different hostname — which is exactly how the last WORKER_URL ended up
+# pointing at nothing.
+
+services:
+  - type: web
+    name: nexus-clips-worker-30af5d
+    runtime: docker
+
+    # Both paths are relative to the repository root, not to the service. The
+    # context is worker/ so the Dockerfile's COPY lines resolve.
+    dockerfilePath: ./worker/Dockerfile
+    dockerContext: ./worker
+
+    # Frankfurt is the closest Render region to the Supabase project in
+    # eu-west-1. Every job moves whole video files to and from Storage, so this
+    # matters more here than it would for an ordinary API.
+    region: frankfurt
+
+    # x264 at 1080x1920 needs real memory. The free instance also sleeps when
+    # idle, which would be fatal: the worker claims jobs by polling, so a
+    # sleeping instance is a queue that never drains.
+    plan: standard
+
+    healthCheckPath: /health
+
+    # Render keeps the running version live if a build fails, so picking up
+    # fixes automatically costs nothing and saves a trip to the dashboard.
+    autoDeploy: true
+
+    # Working space for the video files. A two-hour source plus the clips cut
+    # from it is several gigabytes; the files are deleted after each job, so
+    # this is scratch, not storage.
+    disk:
+      name: nexus-media
+      mountPath: /data
+      sizeGB: 20
+
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: MEDIA_DIR
+        value: /data/nexus-media
+
+      # Prompted for in the dashboard. Nothing secret is stored in this file.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: WORKER_SHARED_SECRET
+        sync: false
+
+      # Only needed once a YouTube channel is connected and auto-upload is on.
+      # Leave blank until then.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false

@@ -1,0 +1,19 @@
+# The image installs its own dependencies and compiles its own TypeScript, so
+# shipping the local copies only slows the build and risks baking in a
+# node_modules built for a different platform.
+node_modules
+dist
+
+# Never let a local env file reach an image.
+.env
+.env.*
+
+# Deployment config for other hosts, and the scripts that drive them.
+fly.toml
+render.yaml
+deploy-fly.sh
+README.md
+
+.git
+.gitignore
+*.log

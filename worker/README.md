@@ -78,11 +78,17 @@ you want before paying anyone to host it.
 
 ## Deploying
 
-### Render (no local tooling needed)
+### Render — browser only, no terminal
 
-`render.yaml` is a blueprint. In the dashboard: **New → Blueprint**, point it at
-this repository, set the root directory to `worker`. Render builds the
-Dockerfile itself and prompts for each secret — nothing is stored in the repo.
+The blueprint is `render.yaml` **at the repository root** — Render only reads it
+from there, which is why it does not sit in this directory.
+
+Dashboard → **New → Blueprint** → pick this repository → **Apply**. Render reads
+the file, builds the Dockerfile itself, and prompts in the web UI for each value
+marked `sync: false`. No CLI, no local checkout.
+
+The address is fixed by the service name in that file:
+`https://nexus-clips-worker-30af5d.onrender.com`
 
 ### Railway
 
