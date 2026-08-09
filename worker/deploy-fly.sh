@@ -115,8 +115,14 @@ fly secrets set --app "$APP" --stage "${SECRET_ARGS[@]}" \
 step "Building and deploying (this is the slow part — several minutes)"
 
 fly deploy --app "$APP" || fail \
-  "The deploy failed. The build log above says why.
-   Copy the last 30 lines or so — that is what is needed to fix it."
+  "The deploy failed. The build log above says why — copy the last 30 lines.
+
+   If it hung on 'Waiting for depot builder', that is Fly's shared build
+   service, not this repo. Try the older builder:
+
+     fly deploy --app $APP --depot=false
+
+   Slower to start, but unaffected when Depot is degraded."
 
 # --- Verify ------------------------------------------------------------------
 

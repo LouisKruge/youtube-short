@@ -5,6 +5,9 @@
 # An em dash saved as UTF-8 then arrives as three Windows-1252 characters, one
 # of which is a quote, which terminates a string early and makes the whole file
 # fail to parse with errors that point at innocent lines. Keep this file ASCII.
+#
+# Run it from inside the worker directory:
+#
 #   cd youtube-short\worker
 #   .\deploy-fly.ps1
 #
@@ -231,8 +234,15 @@ Write-Step "Building and deploying (several minutes - the build runs on Fly, not
 fly deploy --app $app
 if ($LASTEXITCODE -ne 0) {
   Stop-With @"
-The deploy failed. The build log above says why.
-Copy the last 30 lines or so - that is what is needed to diagnose it.
+The deploy failed. The build log above says why - copy the last 30 lines or so.
+
+If it hung on "Waiting for depot builder", that is Fly's shared build service
+rather than anything in this repo. Try the older builder instead:
+
+  fly deploy --app $app --depot=false
+
+That provisions a plain build machine on your own account. Slower to start,
+but unaffected when Depot is degraded. Check status.fly.io as well.
 "@
 }
 
