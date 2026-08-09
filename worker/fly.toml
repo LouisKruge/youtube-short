@@ -7,7 +7,7 @@
 #   # The [mounts] block below needs a volume that already exists, in the same
 #   # region as the app. `fly deploy` fails outright without it, and the error
 #   # does not obviously point here.
-#   fly volumes create nexus_media --size 20 --region dub
+#   fly volumes create nexus_media --size 20 --region lhr
 #
 #   fly secrets set WORKER_SHARED_SECRET=... SUPABASE_URL=... \
 #     SUPABASE_SERVICE_ROLE_KEY=... OPENAI_API_KEY=... ANTHROPIC_API_KEY=...
