@@ -19,6 +19,27 @@ function oauthClient() {
   );
 }
 
+/**
+ * Whether this owner has a channel to publish to.
+ *
+ * Checked before a clip is claimed for upload rather than after. Discovering
+ * this inside `publish` means a clip has already been taken out of the queue
+ * and had an upload row written against it, and the only thing left to do with
+ * it is record a failure — for a condition that has nothing to do with the clip
+ * and will be identical for every other clip in the queue.
+ */
+export async function hasConnectedChannel(ownerId: string): Promise<boolean> {
+  if (!config.googleClientId || !config.googleClientSecret) return false;
+
+  const { data } = await db
+    .from("youtube_accounts")
+    .select("refresh_token")
+    .eq("owner_id", ownerId)
+    .maybeSingle();
+
+  return Boolean((data as { refresh_token?: string } | null)?.refresh_token);
+}
+
 /** Builds an authorized client from the refresh token the app stored. */
 async function authorizedClient(ownerId: string) {
   const { data } = await db

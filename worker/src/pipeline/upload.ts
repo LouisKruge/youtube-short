@@ -16,7 +16,7 @@ import {
   reserveUploadQuota,
   uploadsRemaining,
 } from "../quota.js";
-import { uploadVideo } from "../youtube.js";
+import { hasConnectedChannel, uploadVideo } from "../youtube.js";
 
 /**
  * Stage 8 — Auto-approve.
@@ -210,13 +210,28 @@ async function publish(clip: ClipJob, settings: OwnerSettings): Promise<void> {
         .eq("id", uploadId);
     }
 
+    // A failed publish is not a failed clip.
+    //
+    // The clip has already been cut, cropped, captioned and given a cover
+    // frame. None of that is invalidated by YouTube refusing the upload, or by
+    // there being no channel connected to upload to — and marking it `failed`
+    // threw away finished work and hid it from review. Seven perfectly good
+    // clips were destroyed this way by a single missing OAuth connection.
+    //
+    // Publishing state belongs on the `uploads` row, which is written above and
+    // already carries the reason. The clip goes back to review, where a human
+    // can look at it and try again once the connection exists.
     await updateClip(clip.id, {
-      status: "failed",
-      error_message: message,
+      status: "ready_for_review",
+      error_message: null,
+      last_error: `Publishing failed: ${message}`,
       claimed_at: null,
     });
 
-    log.error("Upload failed", { clipId: clip.id, error: message });
+    log.error("Upload failed, clip returned to review", {
+      clipId: clip.id,
+      error: message,
+    });
   } finally {
     await cleanup(dir);
   }
@@ -232,6 +247,16 @@ export async function uploadStage(): Promise<boolean> {
   for (const settings of await listOwners()) {
     // The safety gate. Nothing publishes while this is off.
     if (!settings.auto_upload_enabled) continue;
+
+    // No channel, nothing to publish to. Checked before claiming so clips stay
+    // in the queue instead of being pulled out one at a time to fail against a
+    // condition that is the same for all of them.
+    if (!(await hasConnectedChannel(settings.owner_id))) {
+      log.warn("Auto-upload is on but no YouTube channel is connected", {
+        ownerId: settings.owner_id,
+      });
+      continue;
+    }
 
     const remaining = await uploadsRemaining(
       settings.owner_id,
