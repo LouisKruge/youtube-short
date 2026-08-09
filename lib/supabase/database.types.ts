@@ -180,6 +180,18 @@ type StyleProfileRow = {
   updated_at: string;
 }
 
+/**
+ * A worker announcing it is alive.
+ *
+ * Not owner-scoped, unlike every other table here: one worker serves the whole
+ * deployment and authenticates with the service-role key rather than as a user.
+ */
+type WorkerHeartbeatRow = {
+  worker_id: string;
+  last_seen_at: string;
+  detail: Json;
+}
+
 type Table<Row, Required extends keyof Row> = {
   Row: Row;
   Insert: Insertable<Row, Required>;
@@ -204,6 +216,7 @@ export interface Database {
       schedule_entries: Table<ScheduleEntryRow, "owner_id" | "clip_id" | "publish_at">;
       clip_analytics: Table<ClipAnalyticsRow, "clip_id" | "owner_id">;
       style_profiles: Table<StyleProfileRow, "owner_id">;
+      worker_heartbeats: Table<WorkerHeartbeatRow, "worker_id">;
     };
     Views: Record<never, never>;
     Functions: {

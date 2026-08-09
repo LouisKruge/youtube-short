@@ -29,6 +29,7 @@ export async function GET() {
       online: health.ok,
       reason: health.reason ?? null,
       ms: health.ms ?? null,
+      via: health.via ?? null,
     },
     { headers: { "cache-control": "no-store" } },
   );

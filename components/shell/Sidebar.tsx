@@ -27,7 +27,7 @@ export function Sidebar({
   onToggle: () => void;
 }) {
   const pathname = usePathname();
-  const { state: worker, reason } = useWorkerState();
+  const { state: worker, reason, via } = useWorkerState();
 
   return (
     <aside
@@ -109,7 +109,9 @@ export function Sidebar({
             <span
               className={cn("t-label truncate", worker === "offline" && "text-fg")}
             >
-              {WORKER_COPY[worker].label}
+              {worker === "online" && via === "heartbeat"
+              ? "worker · polling"
+              : WORKER_COPY[worker].label}
             </span>
           )}
         </span>

@@ -93,14 +93,18 @@ export default async function SettingsPage() {
       name: "Worker service",
       tone: worker.ok ? "done" : "attention",
       state: worker.ok
-        ? "reachable"
+        ? worker.via === "heartbeat"
+          ? "polling"
+          : "reachable"
         : worker.configured
           ? "not answering"
           : "not configured",
       // The probe's own finding. It names one cause — refused, unresolved,
       // timed out, wrong service — rather than handing over a checklist.
       detail: worker.ok
-        ? `ffmpeg, yt-dlp and Whisper run here${worker.ms != null ? ` · answered in ${worker.ms}ms` : ""}`
+        ? worker.via === "heartbeat"
+          ? `Running without an inbound URL — it claims jobs by polling. Last check-in ${worker.heartbeatAgeSeconds}s ago.`
+          : `ffmpeg, yt-dlp and Whisper run here${worker.ms != null ? ` · answered in ${worker.ms}ms` : ""}`
         : (worker.reason ??
           "Nothing will download, cut, caption or upload — none of that runs on Vercel."),
     },

@@ -35,12 +35,15 @@ export interface WorkerReading {
   state: WorkerState;
   /** The specific failure, straight from the probe. Null while healthy. */
   reason: string | null;
+  /** How it was found — an HTTP probe, or a heartbeat from a polling worker. */
+  via: "http" | "heartbeat" | null;
 }
 
 export function useWorkerState(): WorkerReading {
   const [reading, setReading] = useState<WorkerReading>({
     state: "unknown",
     reason: null,
+    via: null,
   });
 
   useEffect(() => {
@@ -50,11 +53,12 @@ export function useWorkerState(): WorkerReading {
       try {
         const res = await fetch("/api/health", { cache: "no-store" });
         if (!res.ok || !live) return;
-        const { configured, online, reason } = await res.json();
+        const { configured, online, reason, via } = await res.json();
         if (!live) return;
         setReading({
           state: !configured ? "unconfigured" : online ? "online" : "offline",
           reason: online ? null : (reason ?? null),
+          via: via ?? null,
         });
       } catch {
         // Leave the last known reading rather than flapping to offline on a

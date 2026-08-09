@@ -43,6 +43,39 @@ A job that throws is returned to the queue with its attempt count incremented.
 After `MAX_ATTEMPTS` it is parked as `failed` with the error message, which
 surfaces in the dashboard.
 
+## Running it locally (no host, no card)
+
+Jobs are claimed by **polling**, not pushed — the HTTP nudge from the app only
+saves up to one poll interval of latency. So the worker does not need to be
+publicly reachable, and running it on your own machine is a supported
+deployment, not a workaround:
+
+```bash
+cd worker
+npm install
+npm run build
+
+WORKER_SHARED_SECRET=anything \
+SUPABASE_URL=https://<project>.supabase.co \
+SUPABASE_SERVICE_ROLE_KEY=<service role key> \
+OPENAI_API_KEY=<...> \
+ANTHROPIC_API_KEY=<...> \
+npm start
+```
+
+You need `ffmpeg` and `yt-dlp` on your PATH — that is the only thing the
+container was providing.
+
+Leave `WORKER_URL` unset in Vercel. The worker writes a heartbeat to Supabase on
+every pass, and the dashboard reads that instead: the sidebar shows
+`worker · polling` and Settings explains it is running without an inbound URL.
+Queued work drains within one poll interval (60s by default).
+
+The trade-offs are real and worth stating: work only happens while your machine
+is awake, and a two-hour source will occupy a core for a while. But it costs
+nothing, and it is the fastest way to find out whether the pipeline does what
+you want before paying anyone to host it.
+
 ## Deploying
 
 ### Render (no local tooling needed)
