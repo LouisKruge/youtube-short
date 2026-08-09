@@ -2,14 +2,25 @@
 #
 # Run from this directory:
 #
-#   fly launch --no-deploy --copy-config --name <your-app-name>
+#   fly launch --no-deploy --copy-config
 #   fly secrets set WORKER_SHARED_SECRET=... SUPABASE_URL=... \
 #     SUPABASE_SERVICE_ROLE_KEY=... OPENAI_API_KEY=... ANTHROPIC_API_KEY=...
 #   fly deploy
 #
-# Then set WORKER_URL (https://<your-app-name>.fly.dev) and the same
-# WORKER_SHARED_SECRET in the Vercel project, and redeploy it.
+# THEN FIND THE REAL HOSTNAME — do not assume it matches the name below:
+#
+#   fly apps list          # or: fly status
+#
+# Fly app names are globally unique across every Fly account, so `launch` will
+# have given you something else if this one was taken, and it rewrites the
+# `app =` line here when it does. Put that hostname in WORKER_URL on Vercel,
+# along with the same WORKER_SHARED_SECRET, and redeploy.
+#
+# A WORKER_URL that "does not resolve" means no app exists at that name. A
+# stopped app still resolves — you would get a refused connection instead.
 
+# PLACEHOLDER. `fly launch` replaces this with whatever name you are actually
+# given. Never copy it into WORKER_URL without checking `fly apps list` first.
 app = "nexus-clips-worker"
 # Dublin, to sit in the same region as the Supabase project (eu-west-1). This
 # worker pushes and pulls multi-gigabyte media to Storage on every job, so

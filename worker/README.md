@@ -109,6 +109,37 @@ npm run dev
 ```
 
 
+## Finding WORKER_URL
+
+The app does not know its own address; the host assigns one. Read it back
+rather than assuming it matches any name in this repo:
+
+| Host | Where to read it |
+|---|---|
+| Fly | `fly apps list` or `fly status` — the hostname is `<app>.fly.dev` |
+| Render | The service page header, `<name>.onrender.com` |
+| Railway | Settings → Networking → the generated domain |
+
+Fly and Render both append or substitute when a name is taken, so the name you
+asked for and the name you got are often different.
+
+Confirm before pasting it into Vercel:
+
+```bash
+curl -i https://<host>/health
+# {"ok":true,"draining":false,"service":"nexus-clips-worker"}
+```
+
+The dashboard's own reading distinguishes the failures for you:
+
+- **does not resolve** — no app exists at that name. Check `fly apps list`.
+  A stopped app still resolves; this means the name is wrong or nothing was
+  ever created.
+- **refused the connection** — the host exists but nothing is listening. The
+  container is not running: check the host's logs for a failed build or a crash.
+- **answered 404 / not the Nexus worker** — something else is at that address.
+- **did not answer within 10s** — likely a cold start; check again shortly.
+
 ## Keeping downloads working
 
 `yt-dlp` tracks YouTube's player, which changes often enough that yt-dlp ships a
