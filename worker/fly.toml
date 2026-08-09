@@ -1,10 +1,17 @@
 # Fly.io deployment for the Nexus Clips worker.
 #
-# Run from this directory:
+# Run from this directory, in this order:
 #
 #   fly launch --no-deploy --copy-config
+#
+#   # The [mounts] block below needs a volume that already exists, in the same
+#   # region as the app. `fly deploy` fails outright without it, and the error
+#   # does not obviously point here.
+#   fly volumes create nexus_media --size 20 --region dub
+#
 #   fly secrets set WORKER_SHARED_SECRET=... SUPABASE_URL=... \
 #     SUPABASE_SERVICE_ROLE_KEY=... OPENAI_API_KEY=... ANTHROPIC_API_KEY=...
+#
 #   fly deploy
 #
 # THEN FIND THE REAL HOSTNAME — do not assume it matches the name below:
@@ -66,6 +73,10 @@ primary_region = "dub"
 
 # Video is written to disk before it goes to Storage. Fly's rootfs is small and
 # ephemeral — a real volume keeps a long source from filling the machine.
+#
+# This volume must be created before the first deploy (see the header). 20 GB
+# holds a long source plus the clips cut from it with room to spare; the files
+# are deleted after each job, so this is working space, not storage.
 [mounts]
   source = "nexus_media"
   destination = "/data"
