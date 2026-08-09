@@ -312,6 +312,14 @@ export function AddMedia({
             placeholder={"https://…\nhttps://…"}
             aria-label="Source video URLs, one per line"
           />
+          <Note className="mt-3">
+            A direct link to a video file works — anything ending in .mp4/.mov,
+            a Drive or Dropbox share set to direct download, your own hosting.
+            So do the platforms yt-dlp supports, where their terms allow it.
+            YouTube will usually refuse a cloud-hosted worker as automated
+            traffic; that is YouTube&rsquo;s check, not a setting here.
+          </Note>
+
           <div className="mt-3 flex items-center gap-3">
             <Button
               type="submit"
