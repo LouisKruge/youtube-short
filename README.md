@@ -140,6 +140,12 @@ type two characters and it searches every transcript you have ingested).
 `1`–`7` jump between sections, `[` collapses the sidebar, `J`/`K` walk the
 queue, `Space` plays, `,`/`.` step a frame.
 
+**Signing in.** Either a password or an emailed link. A magic link is a new
+email on every single sign-in — that is the mechanism, not a setting — so if you
+do not want the inbox round trip, set a password in Settings and use that. The
+session persists in cookies and the middleware refreshes it in the background,
+so signing in is a rare event either way.
+
 **Ingest** takes a local file or a URL. Local files go straight from the browser
 to Supabase Storage over a signed upload URL and enter the pipeline at the
 analyze stage; URLs are fetched by the worker with yt-dlp.

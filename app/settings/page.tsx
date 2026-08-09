@@ -1,10 +1,12 @@
 import { AppShell, PageHeader } from "@/components/shell/AppShell";
+import { PasswordPanel } from "@/components/PasswordPanel";
 import { SettingsForm } from "@/components/SettingsForm";
 import { Panel, PanelHeader, PanelSection } from "@/components/ui/Panel";
 import { Note, Status, type Tone } from "@/components/ui/Status";
 import { Kbd } from "@/components/ui/Tooltip";
 import { pageContext } from "@/lib/page-context";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { workerHealth } from "@/lib/worker";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +31,22 @@ const SHORTCUTS: Array<{ keys: string[]; label: string }> = [
 export default async function SettingsPage() {
   const { ownerId, email, settings, quota, processing } = await pageContext();
   const db = createAdminClient();
+
+  // Asked on the caller's own session: the function keys off auth.uid(), and
+  // service_role has none. A failure here should not take the page down — it
+  // only decides whether the panel reads "set" or "not set".
+  //
+  // @supabase/ssr 0.5.2 does not thread the Database generic through to
+  // Functions, so rpc() types its argument as `undefined`. This one takes none.
+  let hasPassword = false;
+  try {
+    const { data } = await createClient().rpc(
+      "current_user_has_password" as never,
+    );
+    hasPassword = data === true;
+  } catch {
+    // Migration 0004 may not be applied yet on this deployment.
+  }
 
   const [{ data: channel }, { count: queuedCount }, worker] = await Promise.all([
     db
@@ -98,6 +116,8 @@ export default async function SettingsPage() {
         <SettingsForm settings={settings} queuedCount={queuedCount ?? 0} />
 
         <div className="space-y-5">
+          <PasswordPanel hasPassword={hasPassword} />
+
           {/* Channel ----------------------------------------------------- */}
           <Panel>
             <PanelHeader
