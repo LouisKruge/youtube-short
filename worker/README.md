@@ -45,6 +45,19 @@ surfaces in the dashboard.
 
 ## Running it locally (no host, no card)
 
+Scripted:
+
+```bash
+cd youtube-short/worker
+./run-local.sh
+```
+
+It checks Node, ffmpeg and yt-dlp are present (and prints the install command
+for whichever is missing), asks once for the credentials and saves them to a
+gitignored `worker/.env`, builds, and starts. Leave the window open.
+
+Or by hand:
+
 Jobs are claimed by **polling**, not pushed — the HTTP nudge from the app only
 saves up to one poll interval of latency. So the worker does not need to be
 publicly reachable, and running it on your own machine is a supported

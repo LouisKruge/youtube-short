@@ -34,7 +34,9 @@ const WORKER_ID = process.env.WORKER_ID ?? hostname();
  */
 async function heartbeat(): Promise<void> {
   try {
-    await db.from("worker_heartbeats").upsert(
+    // supabase-js resolves with { error } rather than throwing, so the result
+    // has to be inspected — an unchecked call here fails silently forever.
+    const { error } = await db.from("worker_heartbeats").upsert(
       {
         worker_id: WORKER_ID,
         last_seen_at: new Date().toISOString(),
@@ -46,11 +48,49 @@ async function heartbeat(): Promise<void> {
       },
       { onConflict: "worker_id" },
     );
+    if (error) log.warn("Heartbeat rejected", { error: error.message });
   } catch (err) {
     log.warn("Heartbeat failed", {
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/**
+ * Proves the database credentials work before claiming to be running.
+ *
+ * Without this the worker is cheerfully useless when the service-role key is
+ * wrong: supabase-js reports failures in the result rather than by throwing, the
+ * job-claiming queries discard that field, and every pass finds "no work".
+ * Nothing is logged, /health answers 200, and the only visible symptom is that
+ * the queue never moves — which looks like a pipeline bug and is not.
+ *
+ * Exiting is deliberate. On a host it surfaces as a failed deploy, which is
+ * accurate; locally it prints the reason and stops instead of idling.
+ */
+async function verifyDatabaseAccess(): Promise<void> {
+  const { error } = await db
+    .from("source_videos")
+    .select("id", { count: "exact", head: true });
+
+  if (!error) return;
+
+  // PostgrestError often carries an empty `message` for auth failures and puts
+  // the useful part in code/details/hint, so report whichever are populated.
+  const described =
+    [error.message, error.code, error.details, error.hint]
+      .filter((part) => typeof part === "string" && part.length > 0)
+      .join(" · ") ||
+    "the database rejected the request without saying why — an invalid service_role key looks exactly like this";
+
+  log.error("Cannot reach the database — refusing to start", {
+    error: described,
+    supabaseUrl: config.supabaseUrl,
+    hint:
+      "SUPABASE_SERVICE_ROLE_KEY must be the service_role key, not the anon " +
+      "or publishable one, and SUPABASE_URL must be that same project.",
+  });
+  process.exit(1);
 }
 
 const STARTED_AT = new Date().toISOString();
@@ -133,6 +173,11 @@ async function main() {
     () => void heartbeat(),
     Math.min(30_000, Math.max(5_000, Math.floor(config.pollIntervalMs / 2))),
   );
+
+  // Before the first drain, so a bad key is reported at once rather than
+  // discovered later by noticing that nothing ever happens.
+  await verifyDatabaseAccess();
+  log.info("Database reachable", { workerId: WORKER_ID });
 
   void drainOnce("startup");
 }
