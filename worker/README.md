@@ -135,7 +135,26 @@ fly secrets set WORKER_SHARED_SECRET=... SUPABASE_URL=... \
 fly deploy
 ```
 
-### Sizing
+### Running without an Anthropic key
+
+`ANTHROPIC_API_KEY` is optional. Without it the pipeline runs end to end and
+degrades in two specific places:
+
+| With the key | Without |
+|---|---|
+| Candidates ranked on hook, payoff, pacing, curiosity | Ranked on audio energy alone |
+| Clip score, factor breakdown, written assessment | No score — the UI says "not scored" |
+| Hooks and titles written for the clip | First substantial sentence of the transcript |
+| Stronger-opening suggestions | Not offered |
+
+Everything else is unaffected: download, envelope, scene detection,
+transcription, moment windows, the 9:16 crop, dead-time removal, captions,
+cover frames and upload all work exactly the same.
+
+Add the key later and it takes effect on the next source — already-cut clips
+keep the metadata they were given.
+
+## Sizing
 
 - **Disk:** needs room for the largest source video plus a working copy.
   `MEDIA_DIR` defaults to `/tmp/nexus-media`; scratch directories are removed
@@ -223,6 +242,25 @@ change. To pin a known-good release instead:
 ```bash
 docker build --build-arg YTDLP_VERSION=2026.07.01 -t nexus-worker .
 ```
+
+## Running without an Anthropic key
+
+`ANTHROPIC_API_KEY` is optional. Without it the pipeline runs end to end and
+degrades in two specific places:
+
+| With the key | Without |
+|---|---|
+| Candidates ranked on hook, payoff, pacing, curiosity | Ranked on audio energy alone |
+| Clip score, factor breakdown, written assessment | No score — the UI says "not scored" |
+| Hooks and titles written for the clip | First substantial sentence of the transcript |
+| Stronger-opening suggestions | Not offered |
+
+Everything else is unaffected: download, envelope, scene detection,
+transcription, moment windows, the 9:16 crop, dead-time removal, captions,
+cover frames and upload all work exactly the same.
+
+Add the key later and it takes effect on the next source — already-cut clips
+keep the metadata they were given.
 
 ## Sizing
 

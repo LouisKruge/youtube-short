@@ -81,7 +81,12 @@ echo
 
 read -rsp "  SUPABASE_SERVICE_ROLE_KEY (Supabase → Settings → API → service_role): " SERVICE_KEY; echo
 read -rsp "  OPENAI_API_KEY (Whisper transcription): " OPENAI_KEY; echo
-read -rsp "  ANTHROPIC_API_KEY (moment scoring and hooks): " ANTHROPIC_KEY; echo
+echo
+echo "  ANTHROPIC_API_KEY — optional. Press Enter to skip."
+echo "  Without it the pipeline still runs: moments are ranked on audio energy"
+echo "  instead of on craft, and hooks and titles come from the transcript."
+echo "  Add it later with:  fly secrets set ANTHROPIC_API_KEY=... --app $APP"
+read -rsp "  > " ANTHROPIC_KEY; echo
 read -rp  "  SUPABASE_URL [https://pxglkushjutzbmlbbrbe.supabase.co]: " SUPABASE_URL
 SUPABASE_URL=${SUPABASE_URL:-https://pxglkushjutzbmlbbrbe.supabase.co}
 read -rp  "  WORKER_SHARED_SECRET (must match Vercel): " SHARED_SECRET
@@ -89,13 +94,21 @@ read -rp  "  WORKER_SHARED_SECRET (must match Vercel): " SHARED_SECRET
 [ -n "$SERVICE_KEY" ] || fail "SUPABASE_SERVICE_ROLE_KEY is required — the worker cannot claim jobs without it."
 [ -n "$SHARED_SECRET" ] || fail "WORKER_SHARED_SECRET is required."
 
-fly secrets set --app "$APP" --stage \
-  WORKER_SHARED_SECRET="$SHARED_SECRET" \
-  SUPABASE_URL="$SUPABASE_URL" \
-  SUPABASE_SERVICE_ROLE_KEY="$SERVICE_KEY" \
-  OPENAI_API_KEY="$OPENAI_KEY" \
-  ANTHROPIC_API_KEY="$ANTHROPIC_KEY" \
+# Only send keys that were actually given. Setting an empty secret is not the
+# same as leaving it unset — the code checks for a non-empty string to decide
+# whether the feature is available.
+SECRET_ARGS=(
+  "WORKER_SHARED_SECRET=$SHARED_SECRET"
+  "SUPABASE_URL=$SUPABASE_URL"
+  "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_KEY"
+)
+[ -n "$OPENAI_KEY" ]    && SECRET_ARGS+=("OPENAI_API_KEY=$OPENAI_KEY")
+[ -n "$ANTHROPIC_KEY" ] && SECRET_ARGS+=("ANTHROPIC_API_KEY=$ANTHROPIC_KEY")
+
+fly secrets set --app "$APP" --stage "${SECRET_ARGS[@]}" \
   || fail "Could not set secrets."
+
+[ -n "$ANTHROPIC_KEY" ] || echo "  (no Anthropic key — audio-only ranking, transcript-derived hooks)"
 
 # --- Deploy ------------------------------------------------------------------
 
