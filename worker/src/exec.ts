@@ -72,5 +72,25 @@ export const ffmpeg = (args: string[], timeoutMs?: number) =>
 
 export const ffprobe = (args: string[]) => run("ffprobe", ["-hide_banner", ...args]);
 
+/**
+ * Timeout for an ffmpeg pass that reads a whole source end to end.
+ *
+ * A fixed cap is the wrong shape for work whose cost scales with length. The
+ * scene detector had 30 minutes: generous for a five-minute source, and not
+ * enough for a two-hour one, so a long source failed on the clock rather than
+ * on anything wrong with it — then burned two more attempts doing it again.
+ *
+ * Measured on a 1080p30 source, decoding single-threaded: a full pass runs at
+ * roughly 6x realtime. Allowing 1x realtime is therefore a six-fold margin,
+ * which leaves room for a throttled shared vCPU without ever letting a genuine
+ * hang run forever. The floor covers short sources, where process startup and
+ * the first seek dominate.
+ */
+export function scanTimeoutMs(durationSeconds: number | null | undefined): number {
+  const floor = 20 * 60_000;
+  if (!durationSeconds || !Number.isFinite(durationSeconds)) return floor;
+  return Math.max(floor, Math.round(durationSeconds * 1000));
+}
+
 export const ytdlp = (args: string[], timeoutMs?: number) =>
   run("yt-dlp", args, { timeoutMs });

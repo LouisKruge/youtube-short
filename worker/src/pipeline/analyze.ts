@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { config } from "../config.js";
 import { db, getSettings, updateSource, type SourceJob } from "../db.js";
-import { ffmpeg } from "../exec.js";
+import { ffmpeg, scanTimeoutMs } from "../exec.js";
 import { log } from "../log.js";
 import { cleanup, downloadFile, scratchDir } from "../storage.js";
 import { detectScenes, type Scene } from "./scenes.js";
@@ -29,7 +29,10 @@ export interface Peak {
  * asetnsamples fixes the frame length, so each printed value covers exactly
  * one hop.
  */
-export async function loudnessEnvelope(inputPath: string): Promise<number[]> {
+export async function loudnessEnvelope(
+  inputPath: string,
+  durationSeconds?: number | null,
+): Promise<number[]> {
   const sampleRate = 8000;
   const samplesPerFrame = Math.max(
     1,
@@ -53,7 +56,7 @@ export async function loudnessEnvelope(inputPath: string): Promise<number[]> {
       "null",
       "-",
     ],
-    20 * 60_000,
+    scanTimeoutMs(durationSeconds),
   );
 
   const envelope: number[] = [];
@@ -75,10 +78,13 @@ export async function loudnessEnvelope(inputPath: string): Promise<number[]> {
 }
 
 /** Silent spans, used to snap cuts so they do not land mid-word. */
-export async function detectSilences(inputPath: string): Promise<Silence[]> {
+export async function detectSilences(
+  inputPath: string,
+  durationSeconds?: number | null,
+): Promise<Silence[]> {
   const { stderr } = await ffmpeg(
     ["-i", inputPath, "-vn", "-af", "silencedetect=noise=-32dB:d=0.22", "-f", "null", "-"],
-    20 * 60_000,
+    scanTimeoutMs(durationSeconds),
   );
 
   const silences: Silence[] = [];
@@ -226,8 +232,8 @@ export async function analyzeSource(job: SourceJob): Promise<void> {
     const settings = await getSettings(job.owner_id);
 
     const [envelope, silences] = await Promise.all([
-      loudnessEnvelope(sourcePath),
-      detectSilences(sourcePath),
+      loudnessEnvelope(sourcePath, job.duration_seconds),
+      detectSilences(sourcePath, job.duration_seconds),
     ]);
 
     const duration =
