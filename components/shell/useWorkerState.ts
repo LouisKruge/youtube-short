@@ -31,8 +31,17 @@ export const WORKER_COPY: Record<WorkerState, { label: string; title: string }> 
  * The result is shared between the sidebar indicator and the banner, so the two
  * cannot disagree and the page still only makes one request.
  */
-export function useWorkerState(): WorkerState {
-  const [state, setState] = useState<WorkerState>("unknown");
+export interface WorkerReading {
+  state: WorkerState;
+  /** The specific failure, straight from the probe. Null while healthy. */
+  reason: string | null;
+}
+
+export function useWorkerState(): WorkerReading {
+  const [reading, setReading] = useState<WorkerReading>({
+    state: "unknown",
+    reason: null,
+  });
 
   useEffect(() => {
     let live = true;
@@ -41,9 +50,12 @@ export function useWorkerState(): WorkerState {
       try {
         const res = await fetch("/api/health", { cache: "no-store" });
         if (!res.ok || !live) return;
-        const { configured, online } = await res.json();
+        const { configured, online, reason } = await res.json();
         if (!live) return;
-        setState(!configured ? "unconfigured" : online ? "online" : "offline");
+        setReading({
+          state: !configured ? "unconfigured" : online ? "online" : "offline",
+          reason: online ? null : (reason ?? null),
+        });
       } catch {
         // Leave the last known reading rather than flapping to offline on a
         // single dropped request.
@@ -58,5 +70,5 @@ export function useWorkerState(): WorkerState {
     };
   }, []);
 
-  return state;
+  return reading;
 }

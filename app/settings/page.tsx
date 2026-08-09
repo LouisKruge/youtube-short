@@ -91,20 +91,18 @@ export default async function SettingsPage() {
     },
     {
       name: "Worker service",
-      tone: worker ? "done" : "attention",
-      // Three different failures, three different fixes. "Unreachable" when the
-      // variable is simply absent sends the operator looking for a container
-      // that was never started.
-      state: worker
+      tone: worker.ok ? "done" : "attention",
+      state: worker.ok
         ? "reachable"
-        : process.env.WORKER_URL
-          ? "unreachable"
+        : worker.configured
+          ? "not answering"
           : "not configured",
-      detail: worker
-        ? "ffmpeg, yt-dlp and Whisper run here"
-        : process.env.WORKER_URL
-          ? "Configured but not answering. Check the container is running and that WORKER_SHARED_SECRET matches on both sides."
-          : "WORKER_URL is not set. Nothing will download, cut, caption or upload — none of that runs on Vercel. Deploy worker/ to a container host and set WORKER_URL and WORKER_SHARED_SECRET here.",
+      // The probe's own finding. It names one cause — refused, unresolved,
+      // timed out, wrong service — rather than handing over a checklist.
+      detail: worker.ok
+        ? `ffmpeg, yt-dlp and Whisper run here${worker.ms != null ? ` · answered in ${worker.ms}ms` : ""}`
+        : (worker.reason ??
+          "Nothing will download, cut, caption or upload — none of that runs on Vercel."),
     },
   ];
 

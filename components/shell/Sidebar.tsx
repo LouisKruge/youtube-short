@@ -27,7 +27,7 @@ export function Sidebar({
   onToggle: () => void;
 }) {
   const pathname = usePathname();
-  const worker = useWorkerState();
+  const { state: worker, reason } = useWorkerState();
 
   return (
     <aside
@@ -93,7 +93,7 @@ export function Sidebar({
       <div className={cn("flex h-8 items-center rule-t", collapsed ? "flex-col justify-center px-0" : "gap-2 px-3")}>
         <span
           className="flex min-w-0 items-center gap-2"
-          title={WORKER_COPY[worker].title}
+          title={reason ?? WORKER_COPY[worker].title}
         >
           <span
             aria-hidden="true"
