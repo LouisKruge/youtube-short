@@ -115,26 +115,25 @@ Write-Host "   URL:    $url"
 
 Write-Step "Checking the region"
 
-# Fly region codes are three letters and not always the airport you expect -
-# there is no Dublin, for instance. Checking here turns a wrong code into a list
-# of the right ones, instead of a failure part-way through app creation.
+# This check warns; it never stops. `fly platform regions` prints a table whose
+# column order is Fly's business, not ours - an earlier version anchored the
+# match to the start of the line, which meant a perfectly valid "lhr" was
+# rejected because the name column comes first. A check built on parsing someone
+# else's output cannot be trusted over their own error message, and fly launch
+# reports a bad region clearly enough on its own.
 $regionList = fly platform regions 2>$null | Out-String
 if ($LASTEXITCODE -eq 0 -and $regionList -match "\S") {
-  if ($regionList -match ("(?m)^\s*" + [regex]::Escape($region) + "\s")) {
-    Write-Ok "$region is valid"
+  if ($regionList -match ("(?m)\b" + [regex]::Escape($region) + "\b")) {
+    Write-Ok "$region looks valid"
   } else {
     Write-Host ""
+    Write-Host "   Could not find '$region' in Fly's region list:" -ForegroundColor Yellow
     Write-Host $regionList
-    Stop-With @"
-"$region" is not a Fly region. The list above is the real one.
-
-Pick the code nearest your Supabase project (it is in Ireland), then change
-the  primary_region =  line in fly.toml and run this again. lhr, ams and cdg
-are all reasonable.
-"@
+    Write-Host "   Continuing anyway - fly will reject it if it is genuinely wrong." -ForegroundColor Yellow
+    Write-Host "   If it does, pick a code from that list, put it in the"
+    Write-Host "   primary_region = line of fly.toml, and run this again."
   }
 } else {
-  # Not fatal: if the listing cannot be read, let app creation be the judge.
   Write-Ok "could not list regions - continuing"
 }
 
