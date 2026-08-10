@@ -56,13 +56,69 @@ async function extractAudio(
   );
 }
 
+/**
+ * Turns an OpenAI SDK failure into something that names the actual problem.
+ *
+ * The SDK reports every transport failure as `APIConnectionError: Connection
+ * error.` and puts the real one on `.cause` — the same shape as Node's
+ * `TypeError: fetch failed`, and just as useless on its own. Three attempts of
+ * a forty-minute job were spent recording that sentence and nothing else.
+ *
+ * DNS failure, refused connection, TLS rejection, a reset mid-upload and an
+ * expired key all arrive as that one string, and they have completely
+ * different fixes.
+ */
+function describeOpenAIError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+
+  const parts: string[] = [err.message];
+
+  const status = (err as { status?: number }).status;
+  if (typeof status === "number") parts.push(`HTTP ${status}`);
+
+  const code = (err as { code?: string }).code;
+  if (code) parts.push(String(code));
+
+  // Walk the cause chain: APIConnectionError -> fetch TypeError -> the syscall
+  // error that actually says what went wrong.
+  let cause: unknown = (err as { cause?: unknown }).cause;
+  for (let depth = 0; cause instanceof Error && depth < 4; depth++) {
+    const causeCode = (cause as { code?: string }).code;
+    parts.push(causeCode ? `${cause.message} (${causeCode})` : cause.message);
+    cause = (cause as { cause?: unknown }).cause;
+  }
+
+  const text = parts.filter(Boolean).join(" · ");
+
+  // Translate the codes that have a specific, actionable meaning here.
+  if (/ENOTFOUND|EAI_AGAIN/.test(text)) {
+    return `${text} — the worker could not resolve api.openai.com. This is DNS on the worker's host, not the key.`;
+  }
+  if (/ECONNREFUSED|ECONNRESET|EPIPE|ETIMEDOUT|UND_ERR/.test(text)) {
+    return `${text} — the connection to OpenAI dropped mid-request. Usually the host's outbound network rather than the request itself.`;
+  }
+  if (status === 401) {
+    return `${text} — OPENAI_API_KEY is not valid. Check it at platform.openai.com/api-keys.`;
+  }
+  if (status === 429) {
+    return `${text} — rate limited, or the account has no remaining credit. Check usage and billing at platform.openai.com.`;
+  }
+
+  return text;
+}
+
 async function transcribeAudioFile(path: string): Promise<Transcript> {
-  const response = await openai().audio.transcriptions.create({
-    file: readStream(path),
-    model: "whisper-1",
-    response_format: "verbose_json",
-    timestamp_granularities: ["word"],
-  });
+  let response;
+  try {
+    response = await openai().audio.transcriptions.create({
+      file: readStream(path),
+      model: "whisper-1",
+      response_format: "verbose_json",
+      timestamp_granularities: ["word"],
+    });
+  } catch (err) {
+    throw new Error(`Whisper request failed: ${describeOpenAIError(err)}`);
+  }
 
   const raw = response as unknown as {
     text?: string;
@@ -118,6 +174,16 @@ export async function transcribeSource(
   durationSeconds: number,
   onProgress?: (fraction: number) => void,
 ): Promise<Transcript> {
+  // Cheapest possible request first. Reaching this point costs several minutes
+  // of envelope and scene detection, and a key or a network that is not going
+  // to work does not become workable after eleven audio uploads — it just
+  // wastes the whole analysis three times over before saying so.
+  try {
+    await openai().models.list();
+  } catch (err) {
+    throw new Error(`Cannot reach OpenAI: ${describeOpenAIError(err)}`);
+  }
+
   const chunkCount = Math.max(1, Math.ceil(durationSeconds / CHUNK_SECONDS));
 
   const words: TranscriptWord[] = [];
