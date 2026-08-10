@@ -53,7 +53,14 @@ export function sourceStages(
    */
   const transcriptionOff =
     source.analysis != null && source.analysis.transcription_enabled === false;
-  const transcriptionSettled = transcribed || transcriptionOff;
+
+  /** Attempted and failed — the run carried on without a transcript. */
+  const transcriptionFailed = source.analysis?.transcription_failed === true;
+
+  // Settled means "this stage will not produce anything more", which is what
+  // the stage after it is really waiting on. Off, failed and finished all
+  // qualify; only "still going" does not.
+  const transcriptionSettled = transcribed || transcriptionOff || transcriptionFailed;
 
   /** A stage runs when its predecessor is done and it has not produced output. */
   const step = (
@@ -90,12 +97,18 @@ export function sourceStages(
     },
     {
       label: "Transcription",
-      state: transcriptionOff ? "skipped" : step(transcribed, scenes),
+      state: transcriptionOff
+        ? "skipped"
+        : transcriptionFailed
+          ? "failed"
+          : step(transcribed, scenes),
       detail: transcriptionOff
         ? "off"
-        : transcribed
-          ? "word-level"
-          : undefined,
+        : transcriptionFailed
+          ? "no captions"
+          : transcribed
+            ? "word-level"
+            : undefined,
     },
     {
       label: "Moment scoring",

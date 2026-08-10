@@ -98,6 +98,8 @@ export interface SourceVideo {
     scenes?: number;
     transcribed?: boolean;
     transcription_enabled?: boolean;
+    /** Attempted and failed. The run continued without captions. */
+    transcription_failed?: boolean;
     scored_by_model?: boolean;
   } | null;
   error_message: string | null;

@@ -282,13 +282,37 @@ export async function analyzeSource(job: SourceJob): Promise<void> {
     );
 
     let transcript: Transcript = { text: "", words: [] };
+    let transcriptionError: string | null = null;
+
     if (config.transcriptionEnabled) {
-      transcript = await transcribeSource(sourcePath, dir, duration, (fraction) => {
-        log.info("Transcription progress", {
-          sourceId: job.id,
-          percent: Math.round(fraction * 100),
+      // A transcript improves the work; it is not a precondition for it. The
+      // pipeline already runs without one — that is exactly what
+      // TRANSCRIPTION_ENABLED=false does — so a provider being down, out of
+      // credit or rate limited should cost captions, not the whole source.
+      //
+      // It failed hard before: an account with no credit threw away the
+      // envelope, the scene detection and the moment selection, three times,
+      // and left nothing to review.
+      //
+      // Degrading is not the same as hiding. The reason is recorded and the
+      // readout shows the stage as failed rather than quietly complete.
+      try {
+        transcript = await transcribeSource(sourcePath, dir, duration, (fraction) => {
+          log.info("Transcription progress", {
+            sourceId: job.id,
+            percent: Math.round(fraction * 100),
+          });
         });
-      });
+      } catch (err) {
+        transcriptionError = err instanceof Error ? err.message : String(err);
+        log.warn("Transcription failed, continuing without a transcript", {
+          sourceId: job.id,
+          error: transcriptionError,
+        });
+        await updateSource(job.id, {
+          last_error: `Transcription skipped: ${transcriptionError}`,
+        });
+      }
     }
 
     const { data: styleRow } = await db
@@ -385,12 +409,20 @@ export async function analyzeSource(job: SourceJob): Promise<void> {
         // readout leaves Transcription running forever when the stage was never
         // going to run, and holds Moment scoring at waiting behind it.
         transcription_enabled: config.transcriptionEnabled,
+        // Attempted and failed, as opposed to never attempted. The readout
+        // needs to tell those apart: one is "skipped", the other is "failed",
+        // and neither should sit at "running" forever.
+        transcription_failed: transcriptionError !== null,
         scored_by_model: scored.some((s) => s.category !== "unrated"),
       },
       claimed_at: null,
       error_message: null,
-      // A run that reached the end clears the record of the ones that did not.
-      last_error: null,
+      // A run that reached the end clears the record of the ones that did not
+      // — except a transcription that was skipped, which is the reason these
+      // clips have no captions and has to survive the run that produced them.
+      last_error: transcriptionError
+        ? `Transcription skipped: ${transcriptionError}`
+        : null,
       attempts: 0,
     });
 
