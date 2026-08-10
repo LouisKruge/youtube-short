@@ -36,6 +36,15 @@ export interface CropTrack {
    * costs sharpness, so this is bounded rather than free.
    */
   windowHeight: number;
+  /**
+   * Median detected face height, as a fraction of frame height.
+   *
+   * Stored because it is the number that decides the zoom, and without it a
+   * windowHeight of 1 is ambiguous — it means "the face is already large
+   * enough", but there is no way to tell how large that was, or how far off the
+   * threshold it fell, when the framing turns out to be wrong.
+   */
+  faceHeight?: number;
 }
 
 /** How much of the output height a face should occupy. Ordinary talking-head framing. */
@@ -52,6 +61,9 @@ const MIN_WINDOW_HEIGHT = 0.8;
 
 /** Face centre sits here in the output frame — slightly high, as headroom. */
 const FACE_VERTICAL_ANCHOR = 0.4;
+
+/** How long the crop takes to travel between two held positions. */
+const PAN_SECONDS = 0.5;
 
 /**
  * Detections must cover at least this share of sampled frames to be believed.
@@ -236,6 +248,7 @@ function trackFromFaces(samples: FaceSample[]): CropTrack {
     static: false,
     method: "face",
     windowHeight,
+    faceHeight: Number(faceHeight.toFixed(4)),
   };
 }
 
@@ -403,14 +416,35 @@ export function buildCropFilter(track: CropTrack | null, maxSegments = 10): stri
 
   const segments = track.segments.slice(0, maxSegments);
 
-  // Piecewise-constant over t: innermost value is the last segment, wrapped
-  // outward with lt(t,boundary). The segments are already heavily smoothed, so
-  // interpolating between them buys nothing a viewer can see.
+  /**
+   * Holds each position, then eases to the next over PAN_SECONDS.
+   *
+   * This was piecewise-constant, on the reasoning that the segments are
+   * already smoothed so interpolation "buys nothing a viewer can see". That was
+   * wrong, and measurably so: a move is only committed when the centre shifts
+   * by more than the hysteresis threshold, which on a frame scaled to 3413px
+   * wide is at least a 205-pixel step. Applied instantly, that is a hard cut in
+   * framing — and one clip in this source had ten of them inside thirty
+   * seconds. A tracked crop that snaps reads worse than one that never moves.
+   *
+   * Half a second is a deliberate choice over a slower drift: it is fast enough
+   * to keep up with a cut to the other speaker, and short enough that it is not
+   * mistaken for a camera move of its own.
+   */
   const piecewise = (valueFor: (s: CropSegment) => string) => {
     let expression = valueFor(segments[segments.length - 1]);
+
     for (let i = segments.length - 1; i >= 1; i--) {
-      expression = `if(lt(t\\,${segments[i].t.toFixed(2)})\\,${valueFor(segments[i - 1])}\\,${expression})`;
+      const at = segments[i].t;
+      const from = valueFor(segments[i - 1]);
+      const to = valueFor(segments[i]);
+      const ramp = `${from}+(${to}-(${from}))*(t-${at.toFixed(2)})/${PAN_SECONDS}`;
+
+      expression =
+        `if(lt(t\\,${at.toFixed(2)})\\,${from}\\,` +
+        `if(lt(t\\,${(at + PAN_SECONDS).toFixed(2)})\\,${ramp}\\,${expression}))`;
     }
+
     return expression;
   };
 
