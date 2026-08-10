@@ -174,6 +174,69 @@ async function detectFaces(
   }
 }
 
+/** Two faces further apart than this are different people, not one who moved. */
+const SUBJECT_RADIUS = 0.12;
+
+/** Consecutive samples the other person must hold before the crop follows them. */
+const SWITCH_SAMPLES = 3;
+
+/** Weight of each new sample when tracking one subject. Low: smooth, not twitchy. */
+const FOLLOW_ALPHA = 0.3;
+
+/**
+ * Follows one person at a time.
+ *
+ * This replaces a mean over a sliding window, which was actively wrong in the
+ * case that matters most. In a two-person interview the detector reports the
+ * left face on one frame and the right face on the next — both correct — and
+ * the mean of 0.25 and 0.70 is 0.475: the empty gap between them. The crop
+ * centred on nobody, and both people sat half-cut at the edges of the frame.
+ * An average of positions only means anything when the samples describe the
+ * same subject.
+ *
+ * So the track locks on. A detection near the current subject refines it; one
+ * far away is treated as the other person and has to persist for
+ * SWITCH_SAMPLES before the crop follows — which is what stops a single
+ * spurious detection, or one glance across the table, from dragging the frame
+ * away and back.
+ */
+function lockToSubject(samples: FaceSample[]): FaceSample[] {
+  const path: FaceSample[] = [];
+
+  let cx = samples[0].cx;
+  let cy = samples[0].cy;
+  let candidate: number | null = null;
+  let candidateCount = 0;
+
+  for (const sample of samples) {
+    if (Math.abs(sample.cx - cx) <= SUBJECT_RADIUS) {
+      // Same person. Ease toward them rather than snapping to each detection.
+      cx += (sample.cx - cx) * FOLLOW_ALPHA;
+      cy += (sample.cy - cy) * FOLLOW_ALPHA;
+      candidate = null;
+      candidateCount = 0;
+    } else if (candidate !== null && Math.abs(sample.cx - candidate) <= SUBJECT_RADIUS) {
+      candidate = sample.cx;
+      candidateCount += 1;
+
+      if (candidateCount >= SWITCH_SAMPLES) {
+        // The other person has held the frame long enough to be the subject.
+        cx = sample.cx;
+        cy = sample.cy;
+        candidate = null;
+        candidateCount = 0;
+      }
+    } else {
+      candidate = sample.cx;
+      candidateCount = 1;
+    }
+
+    path.push({ t: sample.t, cx, cy, h: sample.h });
+  }
+
+  return path;
+}
+
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
@@ -190,7 +253,7 @@ function median(values: number[]): number {
  * once — and a detector that briefly latches onto something the wrong size
  * would otherwise set the zoom for the entire clip.
  */
-function trackFromFaces(samples: FaceSample[]): CropTrack {
+export function trackFromFaces(samples: FaceSample[]): CropTrack {
   const faceHeight = median(samples.map((s) => s.h));
 
   const windowHeight = Math.min(
@@ -198,27 +261,21 @@ function trackFromFaces(samples: FaceSample[]): CropTrack {
     Math.max(MIN_WINDOW_HEIGHT, faceHeight / TARGET_FACE_HEIGHT),
   );
 
-  // Same smoothing and hysteresis as the motion path: raw per-frame positions
-  // jitter, and a crop that chases them reads worse than one that holds still.
+  const locked = lockToSubject(samples);
+
+  // Hysteresis on the locked path: it is already continuous, so this only
+  // suppresses moves too small to be worth the pan.
   const smoothed: CropSegment[] = [];
-  const windowRadius = SAMPLE_FPS * 2;
 
-  for (let i = 0; i < samples.length; i += SAMPLE_FPS) {
-    const slice = samples.slice(
-      Math.max(0, i - windowRadius),
-      Math.min(samples.length, i + windowRadius + 1),
-    );
-    if (slice.length === 0) continue;
-
-    const cx = slice.reduce((a, s) => a + s.cx, 0) / slice.length;
-    const cy = slice.reduce((a, s) => a + s.cy, 0) / slice.length;
+  for (let i = 0; i < locked.length; i += SAMPLE_FPS) {
+    const point = locked[i];
     const last = smoothed[smoothed.length - 1];
 
-    if (!last || Math.abs(cx - last.center) > 0.06) {
+    if (!last || Math.abs(point.cx - last.center) > 0.06) {
       smoothed.push({
-        t: Number(samples[i].t.toFixed(2)),
-        center: Number(Math.max(0.1, Math.min(0.9, cx)).toFixed(4)),
-        centerY: Number(Math.max(0.1, Math.min(0.9, cy)).toFixed(4)),
+        t: Number(point.t.toFixed(2)),
+        center: Number(Math.max(0.1, Math.min(0.9, point.cx)).toFixed(4)),
+        centerY: Number(Math.max(0.1, Math.min(0.9, point.cy)).toFixed(4)),
       });
     }
   }
