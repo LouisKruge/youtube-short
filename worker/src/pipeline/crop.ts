@@ -45,10 +45,40 @@ export interface CropTrack {
    * threshold it fell, when the framing turns out to be wrong.
    */
   faceHeight?: number;
+  /**
+   * Width of the window to take, as a multiple of frame *height*.
+   *
+   * 9/16 (0.5625) is a plain vertical crop and fills the output edge to edge.
+   * Anything wider cannot fill a 9:16 frame, so it is fitted and the space
+   * above and below is filled — see `padded`.
+   */
+  windowWidth: number;
+  /**
+   * Whether the window is too wide to fill the output and must be fitted.
+   *
+   * The reason this exists: a crop keeps the full height of the source and
+   * discards width, so no crop setting can ever show more of a person than the
+   * source frame already holds. On close-up footage a 9:16 window is narrower
+   * than the subject, and the only way to show the whole of them is to stop
+   * cropping the sides off and fill the leftover space instead.
+   */
+  padded: boolean;
 }
 
 /** How much of the output height a face should occupy. Ordinary talking-head framing. */
 const TARGET_FACE_HEIGHT = 0.15;
+
+/**
+ * How wide a seated person is, measured in face heights.
+ *
+ * Head, shoulders and torso come to roughly three and a half times the height
+ * of the face. This is what decides whether a 9:16 window can hold the subject
+ * at all: on a close-up it cannot, and cropping to one guillotines them.
+ */
+const SUBJECT_WIDTH_IN_FACES = 3.5;
+
+/** A 9:16 window, expressed as a multiple of frame height. */
+const VERTICAL_ASPECT = 9 / 16;
 
 /**
  * Floor for the crop window, as a fraction of source height.
@@ -261,6 +291,14 @@ export function trackFromFaces(samples: FaceSample[]): CropTrack {
     Math.max(MIN_WINDOW_HEIGHT, faceHeight / TARGET_FACE_HEIGHT),
   );
 
+  // How wide the subject actually is, against how wide a 9:16 window is. On
+  // close-up footage — this source runs a face height of 0.23 to 0.46, so a
+  // face is a quarter to nearly half the frame — the subject is far wider than
+  // the window, and cropping to it keeps a face and loses the person.
+  const subjectWidth = SUBJECT_WIDTH_IN_FACES * faceHeight;
+  const windowWidth = Math.max(VERTICAL_ASPECT, subjectWidth);
+  const padded = windowWidth > VERTICAL_ASPECT + 0.001;
+
   const locked = lockToSubject(samples);
 
   // Hysteresis on the locked path: it is already continuous, so this only
@@ -304,8 +342,12 @@ export function trackFromFaces(samples: FaceSample[]): CropTrack {
     // where the face is, which is not the middle of the frame.
     static: false,
     method: "face",
-    windowHeight,
+    // Padding needs the full height of the source; zooming in as well would
+    // throw away the very context padding exists to keep.
+    windowHeight: padded ? 1 : windowHeight,
     faceHeight: Number(faceHeight.toFixed(4)),
+    windowWidth: Number(windowWidth.toFixed(4)),
+    padded,
   };
 }
 
@@ -354,7 +396,7 @@ export async function computeCropTrack(
     );
 
     const files = (await readdir(frameDir)).filter((f) => f.endsWith(".pgm")).sort();
-    if (files.length < 3) return { segments: [], static: true, method: "center", windowHeight: 1 };
+    if (files.length < 3) return { segments: [], static: true, method: "center", windowHeight: 1, windowWidth: VERTICAL_ASPECT, padded: false };
 
     const centers: Array<{ t: number; center: number; weight: number }> = [];
     let previous: Buffer | null = null;
@@ -395,7 +437,7 @@ export async function computeCropTrack(
       previous = Buffer.from(pixels);
     }
 
-    if (centers.length === 0) return { segments: [], static: true, method: "center", windowHeight: 1 };
+    if (centers.length === 0) return { segments: [], static: true, method: "center", windowHeight: 1, windowWidth: VERTICAL_ASPECT, padded: false };
 
     // Smooth hard, then apply hysteresis. Raw per-frame centroids jump around
     // and a crop that chases them looks worse than one that never moves.
@@ -422,7 +464,7 @@ export async function computeCropTrack(
       }
     }
 
-    if (smoothed.length === 0) return { segments: [], static: true, method: "center", windowHeight: 1 };
+    if (smoothed.length === 0) return { segments: [], static: true, method: "center", windowHeight: 1, windowWidth: VERTICAL_ASPECT, padded: false };
 
     const spread =
       Math.max(...smoothed.map((s) => s.center)) - Math.min(...smoothed.map((s) => s.center));
@@ -440,12 +482,14 @@ export async function computeCropTrack(
       method: "motion",
       // Motion knows nothing about vertical framing; keep the full height.
       windowHeight: 1,
+      windowWidth: VERTICAL_ASPECT,
+      padded: false,
     };
   } catch (err) {
     log.warn("Crop tracking failed, falling back to centre crop", {
       error: err instanceof Error ? err.message : String(err),
     });
-    return { segments: [], static: true, method: "center", windowHeight: 1 };
+    return { segments: [], static: true, method: "center", windowHeight: 1, windowWidth: VERTICAL_ASPECT, padded: false };
   } finally {
     await rm(frameDir, { recursive: true, force: true });
   }
@@ -504,6 +548,34 @@ export function buildCropFilter(track: CropTrack | null, maxSegments = 10): stri
 
     return expression;
   };
+
+  // Fit-and-fill, for a subject wider than a 9:16 window.
+  //
+  // A crop keeps every row of the source and throws away columns, so it can
+  // never show more of a person than the frame already holds — and on close-up
+  // footage the frame holds a head where the whole of them is wanted. The only
+  // remaining lever is to stop discarding the columns: take a window wide
+  // enough for the subject, fit it to the output width, and fill the space
+  // above and below with a blurred, zoomed copy of the same picture.
+  //
+  // The blur is built at 136x240 and scaled back up rather than blurred at
+  // full size. A gaussian over 1080x1920 every frame is minutes of CPU across
+  // ten clips; over 136x240 it is nothing, and upscaling a blurred image is
+  // indistinguishable from blurring an upscaled one.
+  if (track.padded) {
+    const width = `trunc(min(iw\\,ih*${track.windowWidth.toFixed(4)})/2)*2`;
+    const x = piecewise(
+      (s) => `max(0\\,min(iw-ow\\,iw*${s.center.toFixed(4)}-ow/2))`,
+    );
+
+    return (
+      `crop=${width}:ih:'${x}':0,split=2[wide][fg];` +
+      `[wide]scale=136:240:force_original_aspect_ratio=increase,crop=136:240,` +
+      `gblur=sigma=6,scale=1080:1920[bg];` +
+      `[fg]scale=1080:-2[sub];` +
+      `[bg][sub]overlay=0:(H-h)/2,setsar=1`
+    );
+  }
 
   // The motion path has no vertical information, so it keeps the original
   // geometry: scale to fill 1920 high, slide a 1080-wide window sideways.
